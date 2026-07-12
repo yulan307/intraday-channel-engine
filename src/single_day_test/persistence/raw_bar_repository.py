@@ -10,5 +10,5 @@ class RawBarRepository(Protocol):
     def load_rth_bars(self, symbol: str, trade_date: date) -> list[RawBar]:
         ...
 
-    def upsert_many(self, bars: Sequence[RawBar]) -> None:
+    def upsert_many(self, bars: Sequence[RawBar], *, bar_size: str, what_to_show: str, use_rth: bool) -> None:
         ...

@@ -41,12 +41,14 @@ def completed_bar(index: int, price: float) -> CompletedBar:
     return CompletedBar(
         raw=RawBar(
             symbol="AAPL",
-            timestamp_et=timestamp,
+            date=int(timestamp.timestamp()),
             open=price,
             high=price + 1.0,
             low=price - 1.0,
             close=price,
             volume=100.0,
+            wap=price,
+            barCount=1,
         ),
         source=BarSource.HIST,
     )

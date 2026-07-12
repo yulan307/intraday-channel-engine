@@ -362,19 +362,21 @@ def validate_parameter_set(params: ParameterSet) -> None:
 @dataclass(frozen=True)
 class RawBar:
     symbol: str
-    timestamp_et: datetime
+    date: int
     open: float
     high: float
     low: float
     close: float
     volume: float
+    wap: float
+    barCount: int
 ```
 
 约束：
 
 ```text
-timestamp_et = 当前分钟开始时间
-所有时间必须为 America/New_York aware datetime。任何 naive datetime 将引发 InputValidationError。非 ET 的 aware datetime 会被自动转换为 ET。
+`date` = IBAPI `formatDate=2` 返回的 UTC Unix epoch 秒，表示当前分钟开始时间。
+原始 Bar 不保存 ET datetime；运行时通过 `RawBar.timestamp_et` 派生 America/New_York aware datetime，用于 RTH 判断和策略处理。
 ```
 
 ### 7.2 Completed Bar
@@ -1742,7 +1744,7 @@ updated_at              TIMESTAMP NOT NULL
 
 ```text
 symbol                  TEXT NOT NULL
-timestamp_et            TIMESTAMP NOT NULL
+timestamp               TIMESTAMP NOT NULL
 trade_date              DATE NOT NULL
 open                    REAL NOT NULL
 high                    REAL NOT NULL
@@ -1753,7 +1755,7 @@ source                  TEXT NOT NULL
 created_at              TIMESTAMP NOT NULL
 updated_at              TIMESTAMP NOT NULL
 
-PRIMARY KEY(symbol, timestamp_et)
+PRIMARY KEY(symbol, timestamp)
 ```
 
 当前只在 Backtest 重新拉取完整 RTH 日数据并校验成功后 upsert。
@@ -1788,7 +1790,7 @@ error_message           TEXT NULL
 核心唯一键：
 
 ```text
-PRIMARY KEY(run_id, timestamp_et)
+PRIMARY KEY(run_id, timestamp)
 ```
 
 至少保存：
@@ -1805,12 +1807,12 @@ Decision 全字段
 
 ```text
 run_id                  TEXT NOT NULL
-timestamp_et            TIMESTAMP NOT NULL
+timestamp               TIMESTAMP NOT NULL
 decision                TEXT NOT NULL
 price                   REAL NOT NULL
 break_count             INTEGER NOT NULL
 
-PRIMARY KEY(run_id, timestamp_et)
+PRIMARY KEY(run_id, timestamp)
 ```
 
 ### 21.6 `run_summary`

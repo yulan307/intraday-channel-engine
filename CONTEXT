@@ -1,22 +1,29 @@
-# Current Context – Phase 1
+# Current Context – Phase 3
 
-Phase 1 is implemented. The test suite passes and strict mypy passes for the
-production package.
+Phase 3 persistence, historical IBAPI access, and the offline strategy runner
+are implemented. Raw market data has one canonical IBAPI-shaped contract:
+`date` is a UTC Unix epoch second and every bar contains OHLC, `volume`,
+`wap`, and `barCount`. America/New_York timestamps are derived only inside the
+runtime for RTH/session validation and strategy consumption.
 
 Implemented scope:
-- Phase 0 src-layout, domain enums/errors/parameters/models/states, pure
-  Protocol interfaces, ET datetime normalization, and FeedEvent validation.
-- Shared finite-input ordinary least-squares regression.
-- Pure `TrendEngine`, including warmup, bounded stacks, R², RMSE, population
-  slope standard deviation, and raw-trend classification.
-- Pure `ChannelEngine`, including old `last_*` prediction semantics, trend
-  segment transitions, current-model regression, absolute deviations, and
-  linear percentile bands.
-- Pure `DecisionEngine` and `DecisionTransition`, including repeated BUY/SELL
-  signals and post-persistence break-count reset semantics.
+- Phase 0 and Phase 1 domain/algorithm contracts remain IO-free.
+- SQLite records IBAPI trading schedules, canonical raw bars, strategy output,
+  signals, runs, and summaries. Phase 2 schema compatibility is deliberately
+  removed; legacy data is rejected after the one-time rebuild.
+- `IbApiGateway` connects to TWS using the selected `configs/ib.yaml` paper or
+  live profile, coordinates callback request IDs, maps
+  errors/timeouts/disconnects to domain errors, resolves `SCHEDULE`, and
+  requests RTH 1-minute `TRADES` history for fixed US SMART/USD stocks.
+- The official IBKR Python API is required: `SCHEDULE` needs client protocol
+  165 or higher. The PyPI 9.81 package is unsupported; this checkout validates
+  official API 10.48.1 (protocol 225) before connecting.
+- The run CLI uses valid local IBAPI data first and fetches/revalidates through
+  TWS only when local data or its cached trading session is missing or invalid.
+- Run JSON files no longer embed parameter values. `parameter_set.path` and
+  `parameter_set.parameter_set_id` select exactly one validated row from the
+  central CSV at `configs/parameter_set.csv`.
 
 Excluded scope:
-- Persistence/database implementations.
-- IBAPI/TWS.
-- Feed implementations and application runner.
-- Orders, recovery, and checkpointing.
+- Live subscriptions and Phase 4 buffering.
+- Orders, recovery, checkpointing, and non-IBAPI source formats.
