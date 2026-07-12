@@ -1,18 +1,22 @@
-# Current Context — Phase 0
+# Current Context – Phase 1
 
-Phase 0 is implemented. Editable install, pytest, mypy, and import smoke checks have passed.
+Phase 1 is implemented. The test suite passes and strict mypy passes for the
+production package.
 
 Implemented scope:
-- src-layout project skeleton.
-- Domain enums, errors, parameters, models, and states.
-- Pure Protocol interfaces.
-- ET datetime normalization and naive-datetime rejection.
-- FeedEvent validation.
+- Phase 0 src-layout, domain enums/errors/parameters/models/states, pure
+  Protocol interfaces, ET datetime normalization, and FeedEvent validation.
+- Shared finite-input ordinary least-squares regression.
+- Pure `TrendEngine`, including warmup, bounded stacks, R², RMSE, population
+  slope standard deviation, and raw-trend classification.
+- Pure `ChannelEngine`, including old `last_*` prediction semantics, trend
+  segment transitions, current-model regression, absolute deviations, and
+  linear percentile bands.
+- Pure `DecisionEngine` and `DecisionTransition`, including repeated BUY/SELL
+  signals and post-persistence break-count reset semantics.
 
 Excluded scope:
-- Algorithms.
 - Persistence/database implementations.
 - IBAPI/TWS.
+- Feed implementations and application runner.
 - Orders, recovery, and checkpointing.
-- Feed implementations.
-- Application runner.

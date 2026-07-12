@@ -5,9 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "intraday-channel-engine"
 version = "0.1.0"
-description = "Phase 0 – project skeleton and domain models"
+description = "Phase 1 – pure intraday channel algorithms"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["numpy>=2.0"]
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "mypy>=1"]
