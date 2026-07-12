@@ -18,6 +18,10 @@ After each run, its persisted `processed_1m_bar` rows are also exported to
 `data/<run_id>.csv`. The CSV uses the exact SQLite table field names and order;
 the SQLite records remain the primary persisted data.
 
+The CLI generates `run_id` at program start as
+`<YYYYMMDD-HHMMSS>_<symbol>_<parameter_set_id>_<3 alphanumeric random characters>`;
+the timestamp uses the local machine timezone and has one-second precision.
+
 Run parameters are supplied in a JSON request containing `symbol`,
 `trade_date`, `direction`, `initial_threshold`, and a `parameter_set` object
 with only `path` and `parameter_set_id`. The selected row is loaded from the

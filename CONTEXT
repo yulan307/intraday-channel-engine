@@ -29,6 +29,10 @@ Implemented scope:
 - Each completed run exports its `processed_1m_bar` rows to `data/<run_id>.csv`.
   The CSV header and field order are read directly from the SQLite table, so its
   fields exactly match the persisted schema; SQLite storage remains unchanged.
+- The CLI generates `run_id` at program start as
+  `<YYYYMMDD-HHMMSS>_<symbol>_<parameter_set_id>_<3 alphanumeric random characters>`.
+  The timestamp uses the local machine timezone and has one-second precision; request
+  JSON cannot override the generated identifier.
 - `IbApiGateway` connects to TWS using the selected `configs/ib.yaml` paper or
   live profile, coordinates callback request IDs, maps
   errors/timeouts/disconnects to domain errors, resolves `SCHEDULE`, and

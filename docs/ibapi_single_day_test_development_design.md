@@ -213,7 +213,7 @@ def run_single_day_test(
 
 ```text
 1. 校验输入
-2. 生成 run_id
+2. 记录精确到秒的本地开始时间，并按 `<YYYYMMDD-HHMMSS>_<symbol>_<parameter_set_id>_<3 位随机字母数字字符>` 生成 `run_id`
 3. 创建 Run 记录
 4. 取得交易日与 RTH
 5. 判断 BACKTEST / LIVE_PAPER
@@ -2062,7 +2062,12 @@ class Clock(Protocol):
 
 ```python
 class IdGenerator(Protocol):
-    def new_run_id(self) -> str:
+    def new_run_id(
+        self,
+        started_at_local: datetime,
+        symbol: str,
+        parameter_set_id: str,
+    ) -> str:
         ...
 
 
