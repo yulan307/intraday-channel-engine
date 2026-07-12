@@ -709,6 +709,15 @@ trade_date == current ET date
 
 ---
 
+## Phase 3 Expand Current-State Override
+
+The implemented Backtest flow scans selected parameter sets over an inclusive
+date range. One generated `run_id` spans every date for one parameter set;
+daily records use `(run_id, trade_date)`. Auto Threshold is application state:
+it is null during warm-up, initializes from the Nth Bar price, and updates for
+the Bar after a triggered BUY or SELL. `docs/phase3_expand.md` is authoritative
+for the current request contract and persistence rules.
+
 ## 10. BarFeed 接口
 
 ### 10.1 统一接口

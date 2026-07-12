@@ -11,6 +11,11 @@ class RunMode(str, Enum):
     LIVE_PAPER = "LIVE_PAPER"
 
 
+class ThresholdMode(str, Enum):
+    FIXED = "FIXED"
+    AUTO = "AUTO"
+
+
 class LivePhase(str, Enum):
     PRE_MARKET_WAIT = "PRE_MARKET_WAIT"
     IN_SESSION = "IN_SESSION"
@@ -44,3 +49,4 @@ class RunStatus(str, Enum):
     RUNNING = "RUNNING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+    SKIPPED = "SKIPPED"

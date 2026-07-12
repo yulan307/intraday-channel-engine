@@ -12,6 +12,7 @@ from .enums import (
     TrendLabel,
     DecisionLabel,
     RunStatus,
+    ThresholdMode,
 )
 from .parameters import ParameterSet
 from .errors import InputValidationError
@@ -40,7 +41,8 @@ class RunRequest:
     trade_date: date
     parameter_set: ParameterSet
     direction: Direction
-    initial_threshold: float
+    threshold_mode: ThresholdMode
+    fixed_threshold: float | None
 
 
 @dataclass(frozen=True)
@@ -50,8 +52,8 @@ class RunContext:
     trade_date: date
     parameter_set: ParameterSet
     direction: Direction
-    initial_threshold: float
-    active_threshold: float
+    threshold_mode: ThresholdMode
+    fixed_threshold: float | None
     mode: RunMode
     live_phase: LivePhase | None
     started_at_et: datetime
@@ -171,8 +173,7 @@ class ProcessedBarRecord:
     direction: Direction
     parameter_set_id: str
     parameter_snapshot: dict[str, object]
-    initial_threshold: float
-    active_threshold: float
+    active_threshold: float | None
     open: float
     high: float
     low: float
@@ -209,7 +210,6 @@ class RunSummary:
     direction: Direction
     parameter_set_id: str
     parameter_snapshot: dict[str, object]
-    initial_threshold: float
     processed_bar_count: int
     signal_count: int
     final_curr_slope: float | None

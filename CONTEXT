@@ -1,51 +1,35 @@
-# Current Context – Phase 3
+# Current Context — Phase 3 Expand
 
-Phase 3 persistence, historical IBAPI access, and the offline strategy runner
-are implemented. Raw market data has one canonical IBAPI-shaped contract:
-`date` is a UTC Unix epoch second and every bar contains OHLC, `volume`,
-`wap`, and `barCount`. America/New_York timestamps are derived only inside the
-runtime for RTH/session validation and strategy consumption.
+Phase 3 Expand is implemented for historical IBAPI backtests. It retains the
+existing BarFeed, Trend, Channel, and Decision engine behavior while adding an
+outer parameter-set and multi-date scan flow.
 
 Implemented scope:
-- Phase 0 and Phase 1 domain/algorithm contracts remain IO-free.
-- SQLite records IBAPI trading schedules, canonical raw bars, strategy output,
-  signals, runs, and summaries. Phase 2 schema compatibility is deliberately
-  removed; legacy data is rejected after the one-time rebuild.
-- `processed_1m_bar` uses schema version `phase3_ibapi_v5`: it preserves every
-  `RawBar` fields (`date`, OHLC, `volume`, `wap`, and `barCount`) plus raw
-  request metadata (`bar_size`, `what_to_show`, `use_rth`, and `source`) as columns and
-  expands parameter, Trend, Channel, and Decision JSON payloads into columns.
-  No original JSON payload columns are retained. Existing `phase3_ibapi_v1`
-  data is cleared once during initialization because it is not migrated.
-- Timestamp naming rule: persisted database columns do not use the `_et`
-  suffix. Runtime aware datetimes normalized to `America/New_York` may use
-  `_et`; raw IBAPI `date` remains a UTC Unix epoch second. A persisted
-  timestamp column is named `timestamp` and documents its representation.
-  `processed_1m_bar` must contain no column whose name ends with `_et`. Existing
-  v1/v2/v3/v4 data is cleared once during initialization because it is not
-  migrated. The table stores `timestamp` as an America/New_York ISO timestamp
-  truncated to the configured bar size; Phase 3 1-minute bars have zero
-  seconds and microseconds.
-- Each completed run exports its `processed_1m_bar` rows to `data/<run_id>.csv`.
-  The CSV header and field order are read directly from the SQLite table, so its
-  fields exactly match the persisted schema; SQLite storage remains unchanged.
-- The CLI generates `run_id` at program start as
-  `<YYYYMMDD-HHMMSS>_<symbol>_<parameter_set_id>_<3 alphanumeric random characters>`.
-  The timestamp uses the local machine timezone and has one-second precision; request
-  JSON cannot override the generated identifier.
-- `IbApiGateway` connects to TWS using the selected `configs/ib.yaml` paper or
-  live profile, coordinates callback request IDs, maps
-  errors/timeouts/disconnects to domain errors, resolves `SCHEDULE`, and
-  requests RTH 1-minute `TRADES` history for fixed US SMART/USD stocks.
-- The official IBKR Python API is required: `SCHEDULE` needs client protocol
-  165 or higher. The PyPI 9.81 package is unsupported; this checkout validates
-  official API 10.48.1 (protocol 225) before connecting.
-- The run CLI uses valid local IBAPI data first and fetches/revalidates through
-  TWS only when local data or its cached trading session is missing or invalid.
-- Run JSON files no longer embed parameter values. `parameter_set.path` and
-  `parameter_set.parameter_set_id` select exactly one validated row from the
-  central CSV at `configs/parameter_set.csv`.
+
+- Raw market data remains canonical IBAPI-shaped data: UTC epoch `date`, OHLC,
+  `volume`, `wap`, and `barCount`. Historical RTH data is cached in SQLite.
+- `processed_1m_bar` keeps Phase 3 v5 fields and order except for removed
+  `initial_threshold`. `active_threshold` is nullable and means the threshold
+  used for the current Bar decision. There are no JSON payload columns and no
+  persisted `_et` columns.
+- The SQLite schema is `phase3_expand_v1`. Initialization verifies its shape;
+  any incompatible Phase 3 tables are cleared and recreated together. Existing
+  data is intentionally not migrated or retained.
+- The request JSON requires one `symbol` and one `direction`, supports
+  `trade_date_start` / `trade_date_end`, one `threshold`, and parameter CSV
+  selection. Request JSON cannot override generated run IDs.
+- `is_active = 1` selects default parameter rows. An explicit
+  `parameter_set_id` overrides that filter. Each selected parameter set gets a
+  generated run ID and scans selected dates in ascending order.
+- Fixed Threshold remains unchanged. Auto Threshold resets every date, writes
+  null during warm-up, initializes from the Nth Bar where N is `trend_window`,
+  and updates after triggered BUY or SELL for the next Bar.
+- `single_day_run` and daily `run_summary` use `(run_id, trade_date)` keys.
+  Non-trading days are `SKIPPED`; failures are `FAILED`; later dates continue.
+  Partial processed rows from failed dates remain in the one multi-day
+  `data/<run_id>.csv` export.
 
 Excluded scope:
+
 - Live subscriptions and Phase 4 buffering.
-- Orders, recovery, checkpointing, and non-IBAPI source formats.
+- Orders, recovery, checkpointing, performance ranking, and scan-level summary.

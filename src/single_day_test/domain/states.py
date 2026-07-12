@@ -52,16 +52,18 @@ class RuntimeState:
     trend: TrendState
     channel: ChannelState
     decision: DecisionState
+    active_threshold: float | None = None
     decision_complete: bool = True
     processed_bar_count: int = 0
     signal_events: list[SignalEvent] = field(default_factory=list)
 
     @classmethod
-    def empty(cls, params: ParameterSet) -> RuntimeState:
+    def empty(cls, params: ParameterSet, active_threshold: float | None = None) -> RuntimeState:
         return cls(
             trend=TrendState.empty(params),
             channel=ChannelState.empty(),
             decision=DecisionState(),
+            active_threshold=active_threshold,
             decision_complete=True,
             processed_bar_count=0,
             signal_events=[],

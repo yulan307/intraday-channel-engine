@@ -13,6 +13,7 @@ from single_day_test.domain.enums import (
     TrendLabel,
     DecisionLabel,
     RunStatus,
+    ThresholdMode,
 )
 from single_day_test.domain.errors import (
     SingleDayTestError,
@@ -201,7 +202,8 @@ def test_instantiate_all_dataclasses():
         trade_date=date(2025, 1, 15),
         parameter_set=params,
         direction=Direction.BUY,
-        initial_threshold=0.0,
+        threshold_mode=ThresholdMode.FIXED,
+        fixed_threshold=0.0,
     )
     # RunContext
     RunContext(
@@ -210,8 +212,8 @@ def test_instantiate_all_dataclasses():
         trade_date=date(2025, 1, 15),
         parameter_set=params,
         direction=Direction.BUY,
-        initial_threshold=0.0,
-        active_threshold=0.0,
+        threshold_mode=ThresholdMode.FIXED,
+        fixed_threshold=0.0,
         mode=RunMode.BACKTEST,
         live_phase=None,
         started_at_et=datetime(2025, 1, 15, 10, 0, tzinfo=ET),
@@ -313,7 +315,6 @@ def test_instantiate_all_dataclasses():
         direction=Direction.BUY,
         parameter_set_id="p1",
         parameter_snapshot={},
-        initial_threshold=0.0,
         active_threshold=0.0,
         open=100.0,
         high=101.0,
@@ -343,7 +344,6 @@ def test_instantiate_all_dataclasses():
         direction=Direction.BUY,
         parameter_set_id="p1",
         parameter_snapshot={},
-        initial_threshold=0.0,
         processed_bar_count=390,
         signal_count=1,
         final_curr_slope=0.5,
@@ -374,7 +374,7 @@ def _runctx_factory(dt):
     return RunContext(
         run_id="r1", symbol="AAPL", trade_date=date(2025, 1, 15),
         parameter_set=_params(), direction=Direction.BUY,
-        initial_threshold=0.0, active_threshold=0.0,
+        threshold_mode=ThresholdMode.FIXED, fixed_threshold=0.0,
         mode=RunMode.BACKTEST, live_phase=None, started_at_et=dt,
     )
 
@@ -426,7 +426,7 @@ def _pbrecord_factory(dt):
         run_id="r1", symbol="AAPL", trade_date=date(2025, 1, 15),
         timestamp_et=dt, mode=RunMode.BACKTEST, bar_source=BarSource.HIST,
         direction=Direction.BUY, parameter_set_id="p1",
-        parameter_snapshot={}, initial_threshold=0.0, active_threshold=0.0,
+        parameter_snapshot={}, active_threshold=0.0,
         open=100.0, high=101.0, low=99.0, close=100.5, volume=1000, wap=100.25, barCount=3,
         trend=trend, channel=channel, decision=decision,
     )
@@ -442,7 +442,7 @@ def _runsumm_start_factory(dt):
         run_id="r1", symbol="AAPL", trade_date=date(2025, 1, 15),
         mode=RunMode.BACKTEST, direction=Direction.BUY,
         parameter_set_id="p1", parameter_snapshot={},
-        initial_threshold=0.0, processed_bar_count=390, signal_count=1,
+        processed_bar_count=390, signal_count=1,
         final_curr_slope=0.5, final_curr_intercept=100.0,
         final_high_percentile=95.0, final_low_percentile=5.0,
         final_channel_length=30, status=RunStatus.COMPLETED,
@@ -457,7 +457,7 @@ def _runsumm_end_factory(dt):
         run_id="r1", symbol="AAPL", trade_date=date(2025, 1, 15),
         mode=RunMode.BACKTEST, direction=Direction.BUY,
         parameter_set_id="p1", parameter_snapshot={},
-        initial_threshold=0.0, processed_bar_count=390, signal_count=1,
+        processed_bar_count=390, signal_count=1,
         final_curr_slope=0.5, final_curr_intercept=100.0,
         final_high_percentile=95.0, final_low_percentile=5.0,
         final_channel_length=30, status=RunStatus.COMPLETED,
@@ -526,7 +526,8 @@ def test_immutable_dataclasses_reject_assignment():
         trade_date=date(2025, 1, 15),
         parameter_set=params,
         direction=Direction.BUY,
-        initial_threshold=0.0,
+        threshold_mode=ThresholdMode.FIXED,
+        fixed_threshold=0.0,
     )
     with pytest.raises(FrozenInstanceError):
         req.symbol = "MSFT"
@@ -537,8 +538,8 @@ def test_immutable_dataclasses_reject_assignment():
         trade_date=date(2025, 1, 15),
         parameter_set=params,
         direction=Direction.BUY,
-        initial_threshold=0.0,
-        active_threshold=0.0,
+        threshold_mode=ThresholdMode.FIXED,
+        fixed_threshold=0.0,
         mode=RunMode.BACKTEST,
         live_phase=None,
         started_at_et=datetime(2025, 1, 15, 10, 0, tzinfo=ET),
@@ -618,7 +619,7 @@ def test_immutable_dataclasses_reject_assignment():
         timestamp_et=datetime(2025, 1, 15, 10, 0, tzinfo=ET),
         mode=RunMode.BACKTEST, bar_source=BarSource.HIST,
         direction=Direction.BUY, parameter_set_id="p1",
-        parameter_snapshot={}, initial_threshold=0.0, active_threshold=0.0,
+        parameter_snapshot={}, active_threshold=0.0,
         open=100.0, high=101.0, low=99.0, close=100.5, volume=1000, wap=100.25, barCount=3,
         trend=trend, channel=channel, decision=decision,
     )
@@ -639,7 +640,7 @@ def test_immutable_dataclasses_reject_assignment():
         run_id="r1", symbol="AAPL", trade_date=date(2025, 1, 15),
         mode=RunMode.BACKTEST, direction=Direction.BUY,
         parameter_set_id="p1", parameter_snapshot={},
-        initial_threshold=0.0, processed_bar_count=390, signal_count=1,
+        processed_bar_count=390, signal_count=1,
         final_curr_slope=0.5, final_curr_intercept=100.0,
         final_high_percentile=95.0, final_low_percentile=5.0,
         final_channel_length=30, status=RunStatus.COMPLETED,

@@ -13,8 +13,7 @@ from ..domain.enums import RunStatus
 from ..domain.errors import PersistenceError
 from ..domain.models import ProcessedBarRecord, RawBar, RunContext, RunSummary, SignalEvent, TradingSession
 
-SCHEMA_VERSION = "phase3_ibapi_v5"
-PREVIOUS_SCHEMA_VERSIONS = {"phase3_ibapi_v1", "phase3_ibapi_v2", "phase3_ibapi_v3", "phase3_ibapi_v4"}
+SCHEMA_VERSION = "phase3_expand_v1"
 
 
 class Database:
@@ -41,16 +40,10 @@ class Database:
         marker = self.connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='schema_meta'").fetchone()
         if marker is not None:
             version = self.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
-            if version is not None and version[0] == SCHEMA_VERSION:
+            if version is not None and version[0] == SCHEMA_VERSION and self._schema_is_current():
                 return
-            if version is not None and version[0] in PREVIOUS_SCHEMA_VERSIONS:
-                # The previous processed-bar shape is intentionally not migrated.
-                # Clear it once and recreate the Phase 3 schema with fixed columns.
-                self._drop_all()
-        has_legacy = self.connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='raw_1m_bar'").fetchone() is not None
-        if has_legacy and not self.rebuild_legacy:
-            raise PersistenceError("Legacy Phase 2 database detected. Reset it explicitly; automatic migration is unsupported.")
-        if has_legacy:
+            self._drop_all()
+        elif self.connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='raw_1m_bar'").fetchone() is not None:
             self._drop_all()
         self.connection.executescript('''
         CREATE TABLE schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -65,11 +58,12 @@ class Database:
           use_rth INTEGER NOT NULL, source TEXT NOT NULL, created_at_epoch INTEGER NOT NULL,
           updated_at_epoch INTEGER NOT NULL, PRIMARY KEY(symbol, date));
         CREATE TABLE single_day_run (
-          run_id TEXT PRIMARY KEY, symbol TEXT NOT NULL, trade_date TEXT NOT NULL, mode TEXT NOT NULL,
+          run_id TEXT NOT NULL, trade_date TEXT NOT NULL, symbol TEXT NOT NULL, mode TEXT NOT NULL,
           live_phase TEXT, direction TEXT NOT NULL, parameter_set_id TEXT NOT NULL,
-          parameter_snapshot_json TEXT NOT NULL, initial_threshold REAL NOT NULL,
-          active_threshold REAL NOT NULL, status TEXT NOT NULL, started_at_epoch INTEGER NOT NULL,
-          ended_at_epoch INTEGER, error_type TEXT, error_message TEXT);
+          parameter_snapshot_json TEXT NOT NULL, threshold_mode TEXT NOT NULL,
+          fixed_threshold REAL, status TEXT NOT NULL, started_at_epoch INTEGER NOT NULL,
+          ended_at_epoch INTEGER, error_type TEXT, error_message TEXT,
+          PRIMARY KEY(run_id, trade_date));
         CREATE TABLE processed_1m_bar (
           run_id TEXT NOT NULL, date INTEGER NOT NULL, timestamp TEXT NOT NULL, symbol TEXT NOT NULL, trade_date TEXT NOT NULL,
           mode TEXT NOT NULL, bar_source TEXT NOT NULL, direction TEXT NOT NULL, parameter_set_id TEXT NOT NULL,
@@ -77,7 +71,7 @@ class Database:
           residual_window INTEGER NOT NULL, r2_threshold REAL NOT NULL,
           channel_high_percentile REAL NOT NULL, channel_low_percentile REAL NOT NULL,
           continuous_break_count INTEGER NOT NULL,
-          initial_threshold REAL NOT NULL, active_threshold REAL NOT NULL,
+          active_threshold REAL,
           open REAL NOT NULL, high REAL NOT NULL, low REAL NOT NULL, close REAL NOT NULL,
           volume REAL NOT NULL, wap REAL NOT NULL, bar_count INTEGER NOT NULL,
           bar_size TEXT NOT NULL, what_to_show TEXT NOT NULL, use_rth INTEGER NOT NULL,
@@ -98,13 +92,37 @@ class Database:
           run_id TEXT NOT NULL, date INTEGER NOT NULL, decision TEXT NOT NULL, price REAL NOT NULL,
           break_count INTEGER NOT NULL, PRIMARY KEY(run_id, date));
         CREATE TABLE run_summary (
-          run_id TEXT PRIMARY KEY, status TEXT NOT NULL, processed_bar_count INTEGER NOT NULL,
+          run_id TEXT NOT NULL, trade_date TEXT NOT NULL, status TEXT NOT NULL, processed_bar_count INTEGER NOT NULL,
           signal_count INTEGER NOT NULL, final_curr_slope REAL, final_curr_intercept REAL,
           final_high_percentile REAL, final_low_percentile REAL, final_channel_length INTEGER NOT NULL,
-          started_at_epoch INTEGER NOT NULL, ended_at_epoch INTEGER NOT NULL, error_type TEXT, error_message TEXT);
+          started_at_epoch INTEGER NOT NULL, ended_at_epoch INTEGER NOT NULL, error_type TEXT, error_message TEXT,
+          PRIMARY KEY(run_id, trade_date));
         ''')
         self.connection.execute("INSERT INTO schema_meta VALUES ('schema_version', ?)", (SCHEMA_VERSION,))
         self.connection.commit()
+
+    def _schema_is_current(self) -> bool:
+        expected = {
+            "schema_meta": ["key", "value"],
+            "trade_date": ["trade_date", "is_trading_day", "session_start_epoch", "session_end_epoch", "source", "created_at_epoch", "updated_at_epoch"],
+            "raw_1m_bar": ["symbol", "date", "open", "high", "low", "close", "volume", "wap", "bar_count", "bar_size", "what_to_show", "use_rth", "source", "created_at_epoch", "updated_at_epoch"],
+            "single_day_run": ["run_id", "trade_date", "symbol", "mode", "live_phase", "direction", "parameter_set_id", "parameter_snapshot_json", "threshold_mode", "fixed_threshold", "status", "started_at_epoch", "ended_at_epoch", "error_type", "error_message"],
+            "processed_1m_bar": ["run_id", "date", "timestamp", "symbol", "trade_date", "mode", "bar_source", "direction", "parameter_set_id", "trend_window", "slope_std_window", "dev_window", "residual_window", "r2_threshold", "channel_high_percentile", "channel_low_percentile", "continuous_break_count", "active_threshold", "open", "high", "low", "close", "volume", "wap", "bar_count", "bar_size", "what_to_show", "use_rth", "source", "trend_price", "trend_slope", "trend_r2", "trend_slope_rmse", "trend_slope_std", "trend_fit_ok", "trend_raw_trend", "trend_stack_length_after", "channel_pred_high", "channel_pred_low", "channel_effective_trend", "channel_last_trend_slope", "channel_last_trend_intercept", "channel_last_trend_bar_count", "channel_last_high_percentile", "channel_last_low_percentile", "channel_curr_trend_slope", "channel_curr_trend_intercept", "channel_curr_high_percentile", "channel_curr_low_percentile", "channel_stack_length_after", "decision", "decision_recorded_break_count", "decision_triggered"],
+            "signal_event": ["run_id", "date", "decision", "price", "break_count"],
+            "run_summary": ["run_id", "trade_date", "status", "processed_bar_count", "signal_count", "final_curr_slope", "final_curr_intercept", "final_high_percentile", "final_low_percentile", "final_channel_length", "started_at_epoch", "ended_at_epoch", "error_type", "error_message"],
+        }
+        actual_tables = {row[0] for row in self.connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall() if not row[0].startswith("sqlite_")}
+        if actual_tables != set(expected):
+            return False
+        for table, expected_columns in expected.items():
+            columns = [row[1] for row in self.connection.execute(f'PRAGMA table_info("{table}")').fetchall()]
+            if columns != expected_columns:
+                return False
+        for table, primary_key in {"single_day_run": ["run_id", "trade_date"], "processed_1m_bar": ["run_id", "date"], "run_summary": ["run_id", "trade_date"], "signal_event": ["run_id", "date"]}.items():
+            actual_primary_key = [row[1] for row in self.connection.execute(f'PRAGMA table_info("{table}")').fetchall() if row[5] > 0]
+            if actual_primary_key != primary_key:
+                return False
+        return True
 
     def _drop_all(self) -> None:
         tables = self.connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
@@ -158,12 +176,14 @@ class SqliteRepositories:
 
     def create(self, context: RunContext) -> None:
         with self.database.transaction():
-            self.database.connection.execute('INSERT INTO single_day_run VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (context.run_id,context.symbol,context.trade_date.isoformat(),context.mode.value,context.live_phase.value if context.live_phase else None,context.direction.value,context.parameter_set.parameter_set_id,json.dumps(context.parameter_set.__dict__),context.initial_threshold,context.active_threshold,RunStatus.RUNNING.value,_epoch(context.started_at_et),None,None,None))
+            self.database.connection.execute('INSERT INTO single_day_run VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (context.run_id,context.trade_date.isoformat(),context.symbol,context.mode.value,context.live_phase.value if context.live_phase else None,context.direction.value,context.parameter_set.parameter_set_id,json.dumps(context.parameter_set.__dict__),context.threshold_mode.value,context.fixed_threshold,RunStatus.RUNNING.value,_epoch(context.started_at_et),None,None,None))
 
-    def mark_completed(self, run_id: str, ended_at_et: datetime) -> None: self._mark(run_id, RunStatus.COMPLETED, ended_at_et, None)
-    def mark_failed(self, run_id: str, ended_at_et: datetime, error_type: str, error_message: str) -> None: self._mark(run_id, RunStatus.FAILED, ended_at_et, (error_type,error_message))
-    def _mark(self, run_id: str, status: RunStatus, ended: datetime, error: tuple[str,str] | None) -> None:
-        with self.database.transaction(): self.database.connection.execute('UPDATE single_day_run SET status=?, ended_at_epoch=?, error_type=?, error_message=? WHERE run_id=?', (status.value,_epoch(ended),error[0] if error else None,error[1] if error else None,run_id))
+    def mark_completed(self, run_id: str, trade_date: date, ended_at_et: datetime) -> None: self._mark(run_id, trade_date, RunStatus.COMPLETED, ended_at_et, None)
+    def mark_failed(self, run_id: str, trade_date: date, ended_at_et: datetime, error_type: str, error_message: str) -> None: self._mark(run_id, trade_date, RunStatus.FAILED, ended_at_et, (error_type,error_message))
+    def mark_skipped(self, context: RunContext, reason: str) -> None:
+        self._mark(context.run_id, context.trade_date, RunStatus.SKIPPED, context.started_at_et, ("NonTradingDayError", reason))
+    def _mark(self, run_id: str, trade_date: date, status: RunStatus, ended: datetime, error: tuple[str,str] | None) -> None:
+        with self.database.transaction(): self.database.connection.execute('UPDATE single_day_run SET status=?, ended_at_epoch=?, error_type=?, error_message=? WHERE run_id=? AND trade_date=?', (status.value,_epoch(ended),error[0] if error else None,error[1] if error else None,run_id,trade_date.isoformat()))
 
     def insert(self, value: ProcessedBarRecord | SignalEvent) -> None:
         epoch = _epoch(value.timestamp_et)
@@ -178,7 +198,7 @@ class SqliteRepositories:
               run_id, date, timestamp, symbol, trade_date, mode, bar_source, direction, parameter_set_id,
               trend_window, slope_std_window, dev_window, residual_window, r2_threshold,
               channel_high_percentile, channel_low_percentile, continuous_break_count,
-              initial_threshold, active_threshold, open, high, low, close, volume, wap, bar_count,
+              active_threshold, open, high, low, close, volume, wap, bar_count,
               bar_size, what_to_show, use_rth, source,
               trend_price, trend_slope, trend_r2, trend_slope_rmse, trend_slope_std,
               trend_fit_ok, trend_raw_trend, trend_stack_length_after,
@@ -188,7 +208,7 @@ class SqliteRepositories:
               channel_curr_trend_intercept, channel_curr_high_percentile, channel_curr_low_percentile,
               channel_stack_length_after, decision, decision_recorded_break_count, decision_triggered
             ) VALUES (
-              ?, ?, ?, ?, ?, ?, ?,
+              ?, ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?, ?, ?,
@@ -204,7 +224,7 @@ class SqliteRepositories:
             parameter['trend_window'], parameter['slope_std_window'], parameter['dev_window'],
             parameter['residual_window'], parameter['r2_threshold'],
             parameter['channel_high_percentile'], parameter['channel_low_percentile'],
-            parameter['continuous_break_count'], value.initial_threshold, value.active_threshold,
+            parameter['continuous_break_count'], value.active_threshold,
             value.open, value.high, value.low, value.close, value.volume, value.wap, value.barCount,
             '1 min', 'TRADES', 1, 'ibapi',
             trend.price, trend.slope, trend.r2, trend.slope_rmse, trend.slope_std,
@@ -220,7 +240,7 @@ class SqliteRepositories:
         ))
 
     def save_summary(self, summary: RunSummary) -> None:
-        with self.database.transaction(): self.database.connection.execute('INSERT INTO run_summary VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (summary.run_id,summary.status.value,summary.processed_bar_count,summary.signal_count,summary.final_curr_slope,summary.final_curr_intercept,summary.final_high_percentile,summary.final_low_percentile,summary.final_channel_length,_epoch(summary.started_at_et),_epoch(summary.ended_at_et),summary.error_type,summary.error_message))
+        with self.database.transaction(): self.database.connection.execute('INSERT INTO run_summary VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (summary.run_id,summary.trade_date.isoformat(),summary.status.value,summary.processed_bar_count,summary.signal_count,summary.final_curr_slope,summary.final_curr_intercept,summary.final_high_percentile,summary.final_low_percentile,summary.final_channel_length,_epoch(summary.started_at_et),_epoch(summary.ended_at_et),summary.error_type,summary.error_message))
 
     def export_processed_run_csv(self, run_id: str, output_dir: str | Path = Path("data")) -> Path:
         rows = self.database.connection.execute(
