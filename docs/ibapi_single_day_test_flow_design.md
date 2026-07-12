@@ -97,6 +97,12 @@ America/New_York
 America/New_York
 ```
 
+当前 Phase 0 的 datetime 规则：
+
+- naive datetime 无效，并抛出 `InputValidationError`。
+- 非 `America/New_York` 时区的 aware datetime 通过 `astimezone` 统一转换为 `America/New_York`。
+- 不会静默解释 naive datetime。
+
 之后所有：
 
 - 日期比较

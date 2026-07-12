@@ -182,6 +182,23 @@ class RunRequest:
     initial_threshold: float
 ```
 
+### Phase 0 RunContext contract
+
+```python
+@dataclass(frozen=True)
+class RunContext:
+    run_id: str
+    symbol: str
+    trade_date: date
+    parameter_set: ParameterSet
+    direction: Direction
+    initial_threshold: float
+    active_threshold: float
+    mode: RunMode
+    live_phase: LivePhase | None
+    started_at_et: datetime
+```
+
 ### 4.2 入口函数
 
 ```python
@@ -307,12 +324,32 @@ class ParameterSet:
 
 ```python
 def validate_parameter_set(params: ParameterSet) -> None:
-    assert params.trend_window >= 3
-    assert params.slope_std_window >= 2
-    assert 0.0 <= params.r2_threshold <= 1.0
-    assert 0.0 <= params.channel_high_percentile <= 100.0
-    assert 0.0 <= params.channel_low_percentile <= 100.0
-    assert params.continuous_break_count >= 1
+    if params.trend_window < 3:
+        raise InputValidationError(
+            f"trend_window must be >= 3, got {params.trend_window}"
+        )
+    if params.slope_std_window < 2:
+        raise InputValidationError(
+            f"slope_std_window must be >= 2, got {params.slope_std_window}"
+        )
+    if not (0.0 <= params.r2_threshold <= 1.0):
+        raise InputValidationError(
+            f"r2_threshold must be between 0 and 1 inclusive, got {params.r2_threshold}"
+        )
+    if not (0.0 <= params.channel_high_percentile <= 100.0):
+        raise InputValidationError(
+            f"channel_high_percentile must be between 0 and 100 inclusive, "
+            f"got {params.channel_high_percentile}"
+        )
+    if not (0.0 <= params.channel_low_percentile <= 100.0):
+        raise InputValidationError(
+            f"channel_low_percentile must be between 0 and 100 inclusive, "
+            f"got {params.channel_low_percentile}"
+        )
+    if params.continuous_break_count < 1:
+        raise InputValidationError(
+            f"continuous_break_count must be >= 1, got {params.continuous_break_count}"
+        )
 ```
 
 ---
@@ -337,7 +374,7 @@ class RawBar:
 
 ```text
 timestamp_et = 当前分钟开始时间
-所有时间必须为 America/New_York aware datetime
+所有时间必须为 America/New_York aware datetime。任何 naive datetime 将引发 InputValidationError。非 ET 的 aware datetime 会被自动转换为 ET。
 ```
 
 ### 7.2 Completed Bar
@@ -347,6 +384,40 @@ timestamp_et = 当前分钟开始时间
 class CompletedBar:
     raw: RawBar
     source: BarSource
+```
+
+### Phase 0 support models
+
+```python
+@dataclass(frozen=True)
+class TrendBar:
+    timestamp_et: datetime
+    price: float
+
+
+@dataclass(frozen=True)
+class ChannelBar:
+    timestamp_et: datetime
+    price: float
+    high: float
+    low: float
+
+
+@dataclass(frozen=True)
+class TradingSession:
+    trade_date: date
+    is_trading_day: bool
+    session_start_et: datetime | None
+    session_end_et: datetime | None
+
+
+@dataclass(frozen=True)
+class SignalEvent:
+    run_id: str
+    timestamp_et: datetime
+    decision: DecisionLabel
+    price: float
+    break_count: int
 ```
 
 只允许已经结束、不再更新的 1-minute Bar 进入 Core Pipeline。
@@ -435,6 +506,33 @@ class ProcessedBarRecord:
     decision: DecisionResult
 ```
 
+### Phase 0 RunSummary contract
+
+```python
+@dataclass(frozen=True)
+class RunSummary:
+    run_id: str
+    symbol: str
+    trade_date: date
+    mode: RunMode
+    direction: Direction
+    parameter_set_id: str
+    parameter_snapshot: dict[str, object]
+    initial_threshold: float
+    processed_bar_count: int
+    signal_count: int
+    final_curr_slope: float | None
+    final_curr_intercept: float | None
+    final_high_percentile: float | None
+    final_low_percentile: float | None
+    final_channel_length: int
+    status: RunStatus
+    started_at_et: datetime
+    ended_at_et: datetime
+    error_type: str | None
+    error_message: str | None
+```
+
 ---
 
 ## 8. 运行时状态
@@ -456,15 +554,12 @@ class RuntimeState:
 初始化：
 
 ```python
-RuntimeState(
-    trend=TrendState.empty(),
-    channel=ChannelState.empty(),
-    decision=DecisionState(break_count=0),
-    decision_complete=True,
-    processed_bar_count=0,
-    signal_events=[],
-)
+RuntimeState.empty(params)
 ```
+
+This factory composes `TrendState.empty(params)`, `ChannelState.empty()`, and
+`DecisionState(0)`, with `decision_complete=True`,
+`processed_bar_count=0`, and `signal_events=[]`.
 
 ### 8.2 TrendState
 
@@ -473,6 +568,13 @@ RuntimeState(
 class TrendState:
     bars: deque[TrendBar]
     valid_slopes: deque[float]
+
+    @classmethod
+    def empty(cls, params: ParameterSet) -> TrendState:
+        return cls(
+            bars=deque(maxlen=params.trend_window),
+            valid_slopes=deque(maxlen=params.slope_std_window),
+        )
 ```
 
 约束：
@@ -615,6 +717,10 @@ class FeedEvent:
     status: FeedStatus
     bar: CompletedBar | None
 ```
+
+`FeedEvent` requires a non-null `bar` when `status` is `BAR_AVAILABLE`.
+`BAR_WAITING` and `BAR_END` require `bar=None`; invalid combinations raise
+`InputValidationError`.
 
 ```python
 class BarFeed(Protocol):
@@ -900,6 +1006,15 @@ class IbGateway(Protocol):
     ) -> SubscriptionHandle:
         ...
 ```
+
+```python
+class SubscriptionHandle(Protocol):
+    def close(self) -> None:
+        ...
+```
+
+Phase 0 defines these as Protocol boundaries only; it does not provide a
+concrete IBAPI implementation.
 
 ### 13.2 适配层职责
 
@@ -1915,6 +2030,20 @@ class Clock(Protocol):
         ...
 ```
 
+```python
+class IdGenerator(Protocol):
+    def new_run_id(self) -> str:
+        ...
+
+
+class StructuredLogger(Protocol):
+    def info(self, event: str, **fields: object) -> None:
+        ...
+
+    def error(self, event: str, **fields: object) -> None:
+        ...
+```
+
 单元测试不得直接调用 `datetime.now()`。
 
 ### 25.3 Repository Protocol
@@ -1924,6 +2053,20 @@ class ProcessedBarRepository(Protocol):
     def insert(self, record: ProcessedBarRecord) -> None:
         ...
 ```
+
+Phase 0 repository Protocol contracts are:
+
+```text
+TradeDateRepository.get/save
+RawBarRepository.load_rth_bars/upsert_many
+RunRepository.create/mark_completed/mark_failed
+ProcessedBarRepository.insert
+SignalRepository.insert
+SummaryRepository.save
+```
+
+These are interface boundaries only; Phase 0 provides no concrete database
+implementation.
 
 其他 Repository 使用相同接口隔离原则。
 

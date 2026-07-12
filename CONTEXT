@@ -1,0 +1,18 @@
+# Current Context — Phase 0
+
+Phase 0 is implemented. Editable install, pytest, mypy, and import smoke checks have passed.
+
+Implemented scope:
+- src-layout project skeleton.
+- Domain enums, errors, parameters, models, and states.
+- Pure Protocol interfaces.
+- ET datetime normalization and naive-datetime rejection.
+- FeedEvent validation.
+
+Excluded scope:
+- Algorithms.
+- Persistence/database implementations.
+- IBAPI/TWS.
+- Orders, recovery, and checkpointing.
+- Feed implementations.
+- Application runner.
