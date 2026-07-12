@@ -14,8 +14,11 @@ from .summary_service import build_completed_summary, build_failed_summary
 
 class SingleDayRunner:
     def __init__(self, database: Database, repositories: SqliteRepositories) -> None: self.database,self.repositories=database,repositories
-    def execute_run(self, context: RunContext, feed: BarFeed, initial_state: RuntimeState) -> RunSummary:
-        state=initial_state; self.repositories.create(context); feed.start()
+    def execute_run(self, context: RunContext, feed: BarFeed, initial_state: RuntimeState, *, create_run: bool = True) -> RunSummary:
+        state=initial_state
+        if create_run:
+            self.repositories.create(context)
+        feed.start()
         try:
             while True:
                 event=feed.next_event()
@@ -28,14 +31,12 @@ class SingleDayRunner:
                     state=transition.next_state_after_persist
                 elif event.status is FeedStatus.BAR_END:
                     summary=build_completed_summary(context,state,datetime.now(ZoneInfo('America/New_York')))
-                    self.repositories.export_processed_run_csv(context.run_id)
-                    self.repositories.save_summary(summary); self.repositories.mark_completed(context.run_id,summary.ended_at_et); return summary
+                    self.repositories.save_summary(summary); self.repositories.mark_completed(context.run_id,context.trade_date,summary.ended_at_et); return summary
                 elif event.status is not FeedStatus.BAR_WAITING: raise RuntimeError(f'Unexpected feed status: {event.status}')
         except Exception as exc:
             summary=build_failed_summary(context,state,exc,datetime.now(ZoneInfo('America/New_York')))
             try:
-                self.repositories.save_summary(summary); self.repositories.mark_failed(context.run_id,summary.ended_at_et,type(exc).__name__,str(exc))
-                self.repositories.export_processed_run_csv(context.run_id)
+                self.repositories.save_summary(summary); self.repositories.mark_failed(context.run_id,context.trade_date,summary.ended_at_et,type(exc).__name__,str(exc))
             except Exception: pass
             raise
         finally: feed.close()

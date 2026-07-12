@@ -309,6 +309,14 @@ flowchart TD
 
 ---
 
+## Phase 3 Expand Current-State Override
+
+Backtest now loops selected parameter sets and selected calendar dates. Each
+parameter set receives one generated `run_id`; `SKIPPED` non-trading days and
+`FAILED` days do not stop later dates. One CSV is exported after all dates.
+Auto Threshold is resolved before Decision evaluation and remains null during
+warm-up. `docs/phase3_expand.md` defines the current authoritative flow.
+
 ## 7. `1m_bar_prepare` 模块
 
 ### 7.1 模块职责

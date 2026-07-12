@@ -486,6 +486,22 @@ The CLI generates each `run_id` at program start using the format
 The timestamp uses the local machine timezone and has one-second precision. A request
 JSON must not override the generated identifier.
 
+### Phase 3 Expand implementation override
+
+Phase 3 Expand adds an outer parameter-set scan and an inner inclusive
+multi-date backtest. The parameter CSV has `is_active`; an empty requested ID
+selects every row with `is_active = 1`, while an explicit ID selects one row.
+The request uses `trade_date_start` / `trade_date_end` and one `threshold`.
+Numeric values are Fixed; omitted or null is Auto. Auto Threshold resets each
+date, initializes from the Nth Bar where N equals `trend_window`, and updates
+after triggered BUY or SELL for the following Bar.
+
+Each parameter set receives one generated `run_id` across all selected dates.
+`single_day_run` and daily `run_summary` use `(run_id, trade_date)` keys.
+Non-trading days are `SKIPPED`; failed dates continue; one final CSV aggregates
+all persisted processed rows for the `run_id`. The schema is rebuilt without
+retaining old data when its fields or keys do not match Phase 3 Expand.
+
 ## 6.1 目标
 
 首次接入 TWS。

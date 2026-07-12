@@ -1,9 +1,8 @@
 {
   "symbol": "MU",
-  "trade_date": "2026-01-02",
+  "trade_date_start": "2026-01-02",
   "direction": "BUY",
-  "initial_threshold": 1000.0,
-  "active_threshold": 1000.0,
+  "threshold": 1000.0,
   "parameter_set": {
     "path": "configs/parameter_set.csv",
     "parameter_set_id": "mu-phase3-v1"
