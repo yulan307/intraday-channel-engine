@@ -162,6 +162,13 @@ IbGateway
 7. mypy 或等效静态检查无核心类型错误。
 ```
 
+### Phase 0 当前实现说明
+
+- `ParameterSet` 校验仅覆盖本文档定义的六项规则，违规时抛出 `InputValidationError`，不使用 `assert`，也不额外校验保留参数。
+- naive datetime 抛出 `InputValidationError`；非 ET 的 aware datetime 通过 `astimezone` 统一为 `America/New_York`，不静默解释 naive 时间。
+- `TrendState.empty(params)` 与 `RuntimeState.empty(params)` 按 `ParameterSet` 创建具有对应 `maxlen` 的 deque。
+- Phase 0 仅提供 Protocol 接口，不包含数据库或 IBAPI 实现：`Clock.now_et`；`IdGenerator.new_run_id`；`StructuredLogger.info/error`；`BarFeed.start/next_event/close`；`SubscriptionHandle.close`；`IbGateway.query_trading_session/request_historical_1m_bars/subscribe_completed_1m_bars`；`TradeDateRepository.get/save`；`RawBarRepository.load_rth_bars/upsert_many`；`RunRepository.create/mark_completed/mark_failed`；`ProcessedBarRepository.insert`；`SignalRepository.insert`；`SummaryRepository.save`。
+
 ## 3.5 完成门槛
 
 只有当领域模型不再频繁变化，才进入 Phase 1。
