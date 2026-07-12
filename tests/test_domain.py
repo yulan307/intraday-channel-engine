@@ -320,6 +320,8 @@ def test_instantiate_all_dataclasses():
         low=99.0,
         close=100.5,
         volume=1000,
+        wap=100.25,
+        barCount=3,
         trend=trend,
         channel=channel,
         decision=decision,
@@ -425,7 +427,7 @@ def _pbrecord_factory(dt):
         timestamp_et=dt, mode=RunMode.BACKTEST, bar_source=BarSource.HIST,
         direction=Direction.BUY, parameter_set_id="p1",
         parameter_snapshot={}, initial_threshold=0.0, active_threshold=0.0,
-        open=100.0, high=101.0, low=99.0, close=100.5, volume=1000,
+        open=100.0, high=101.0, low=99.0, close=100.5, volume=1000, wap=100.25, barCount=3,
         trend=trend, channel=channel, decision=decision,
     )
 
@@ -617,7 +619,7 @@ def test_immutable_dataclasses_reject_assignment():
         mode=RunMode.BACKTEST, bar_source=BarSource.HIST,
         direction=Direction.BUY, parameter_set_id="p1",
         parameter_snapshot={}, initial_threshold=0.0, active_threshold=0.0,
-        open=100.0, high=101.0, low=99.0, close=100.5, volume=1000,
+        open=100.0, high=101.0, low=99.0, close=100.5, volume=1000, wap=100.25, barCount=3,
         trend=trend, channel=channel, decision=decision,
     )
     with pytest.raises(FrozenInstanceError):

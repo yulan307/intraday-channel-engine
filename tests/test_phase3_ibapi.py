@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import sqlite3
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
@@ -9,7 +10,8 @@ import pytest
 
 from single_day_test.bar_feed.bar_validation import validate_complete_backtest_day
 from single_day_test.domain.errors import HistoricalDataError, PersistenceError
-from single_day_test.domain.models import RawBar, TradingSession
+from single_day_test.domain.enums import BarSource, DecisionLabel, Direction, RunMode, TrendLabel
+from single_day_test.domain.models import ChannelResult, DecisionResult, ProcessedBarRecord, RawBar, TradingSession, TrendResult
 from single_day_test.ib.config import IbConfig
 from single_day_test.ib.gateway import IbApiGateway, _PendingRequest
 from single_day_test.ib.services import HistoricalBarService, TradingSessionService
@@ -96,4 +98,49 @@ def test_legacy_schema_requires_explicit_one_time_rebuild(tmp_path) -> None:
     with pytest.raises(PersistenceError, match="Legacy Phase 2"):
         Database(path).initialize()
     database = Database(path, rebuild_legacy=True); database.initialize()
-    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "phase3_ibapi_v1"
+    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "phase3_ibapi_v5"
+
+
+def test_previous_phase3_schema_is_cleared_once_and_recreated(tmp_path) -> None:
+    path = tmp_path / "previous_phase3.sqlite3"
+    database = Database(path)
+    database.initialize()
+    database.connection.execute("INSERT INTO raw_1m_bar VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                ("AAPL", 1736951400, 1, 2, 0, 1, 10, 1, 1, "1 min", "TRADES", 1, "test", 1, 1,))
+    database.connection.commit()
+    database.connection.execute("UPDATE schema_meta SET value='phase3_ibapi_v4' WHERE key='schema_version'")
+    database.connection.commit()
+    database.initialize()
+    assert database.connection.execute("SELECT COUNT(*) FROM raw_1m_bar").fetchone()[0] == 0
+    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "phase3_ibapi_v5"
+    columns = {row[1] for row in database.connection.execute("PRAGMA table_info(processed_1m_bar)")}
+    assert {"date", "timestamp", "wap", "bar_count", "bar_size", "what_to_show", "use_rth", "source", "trend_slope", "channel_pred_high", "decision_triggered"} <= columns
+    assert not any(column.lower().endswith("_et") or column.lower() == "et" for column in columns)
+    assert not {"parameter_snapshot_json", "trend_json", "channel_json", "decision_json"} & columns
+
+
+def test_processed_run_csv_uses_the_processed_table_fields(tmp_path) -> None:
+    database = Database(tmp_path / "phase3.sqlite3")
+    database.initialize()
+    repositories = SqliteRepositories(database)
+    timestamp = datetime(2025, 1, 15, 10, 0, tzinfo=ET)
+    record = ProcessedBarRecord(
+        "run-1", "AAPL", date(2025, 1, 15), timestamp, RunMode.BACKTEST, BarSource.HIST,
+        Direction.BUY, "params", {"trend_window": 30, "slope_std_window": 5, "dev_window": 5,
+        "residual_window": 5, "r2_threshold": 0.5, "channel_high_percentile": 95.0,
+        "channel_low_percentile": 5.0, "continuous_break_count": 3}, 0.0, 0.0,
+        100.0, 101.0, 99.0, 100.5, 10.0, 100.25, 3,
+        TrendResult(100.5, 0.1, 0.9, 0.01, 0.02, True, TrendLabel.UP, 30),
+        ChannelResult(None, None, TrendLabel.UP, None, None, None, None, None, 0.1, 100.0, 95.0, 5.0, 30),
+        DecisionResult(DecisionLabel.BUY, 3, True),
+    )
+    with database.transaction():
+        repositories.insert(record)
+    path = repositories.export_processed_run_csv("run-1", tmp_path / "data")
+    with path.open(newline="", encoding="utf-8") as stream:
+        rows = list(csv.DictReader(stream))
+    columns = [column[1] for column in database.connection.execute("PRAGMA table_info(processed_1m_bar)")]
+    assert path.name == "run-1.csv"
+    assert list(rows[0]) == columns
+    assert rows[0]["run_id"] == "run-1"
+    assert rows[0]["timestamp"] == "2025-01-15T10:00:00-05:00"

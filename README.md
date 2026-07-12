@@ -6,6 +6,18 @@ is persisted in SQLite with its native fields: UTC epoch `date`, OHLC,
 `what_to_show`, and `use_rth`). ET timestamps are derived only for RTH checks
 and strategy processing.
 
+`processed_1m_bar` is fully columnar: it preserves all RawBar fields and raw
+request metadata (`bar_size`, `what_to_show`, `use_rth`, and `source`), and
+expands parameter, Trend, Channel, and Decision payload fields into queryable
+columns. Original JSON payload columns are not stored. The incompatible
+Phase 3 v1/v2/v3/v4 schemas are cleared once during initialization and are not
+migrated. `processed_1m_bar` contains no columns with an `_et` suffix and
+stores an America/New_York `timestamp` at 1-minute bar precision.
+
+After each run, its persisted `processed_1m_bar` rows are also exported to
+`data/<run_id>.csv`. The CSV uses the exact SQLite table field names and order;
+the SQLite records remain the primary persisted data.
+
 Run parameters are supplied in a JSON request containing `symbol`,
 `trade_date`, `direction`, `initial_threshold`, and a `parameter_set` object
 with only `path` and `parameter_set_id`. The selected row is loaded from the
