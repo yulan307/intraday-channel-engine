@@ -43,8 +43,11 @@ initial_threshold
 程序启动时生成：
 
 ```text
-run_id
+run_id = <程序开始时间 YYYYMMDD-HHMMSS>_<symbol>_<parameter_set_id>_<3 位随机字母数字字符>
 ```
+
+程序开始时间使用运行机器的本地时区并精确到秒。`run_id` 不从请求 JSON 传入，
+每次启动都由程序重新生成。
 
 并初始化：
 
@@ -63,7 +66,7 @@ active_threshold = initial_threshold
 | `parameter_set` | 本次运行使用的参数集 |
 | `direction` | `BUY` 或 `SELL` |
 | `initial_threshold` | 本次运行的初始阈值 |
-| `run_id` | 当前 Single Day 运行实例的唯一标识，由程序启动时生成 |
+| `run_id` | 当前 Single Day 运行实例的唯一标识，由程序开始时间、`symbol`、`parameter_set_id` 和 3 位随机字母数字字符组成 |
 
 建议入口形式：
 

@@ -481,6 +481,11 @@ After each run, export that run's persisted `processed_1m_bar` rows to
 SQLite table. This export is additive: the existing SQLite persistence remains
 unchanged and authoritative.
 
+The CLI generates each `run_id` at program start using the format
+`<YYYYMMDD-HHMMSS>_<symbol>_<parameter_set_id>_<3 alphanumeric random characters>`.
+The timestamp uses the local machine timezone and has one-second precision. A request
+JSON must not override the generated identifier.
+
 ## 6.1 目标
 
 首次接入 TWS。

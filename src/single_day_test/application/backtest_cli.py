@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import uuid
 from datetime import date, datetime
 from pathlib import Path
 
@@ -16,6 +15,7 @@ from ..ib.config import IbConfig
 from ..ib.gateway import IbApiGateway
 from ..ib.services import HistoricalBarService, TradingSessionService
 from ..persistence.database import Database, SqliteRepositories
+from ..support.ids import DefaultIdGenerator
 from .single_day_runner import SingleDayRunner
 
 DEFAULT_DATABASE = Path("data/intraday_channel.sqlite3")
@@ -44,6 +44,7 @@ def main() -> None:
     if args.command == "init-db":
         print(f"Initialized Phase 3 IBAPI schema: {args.database}")
         return
+    started_at_local = datetime.now().astimezone().replace(microsecond=0)
     payload = json.loads(args.request.read_text(encoding="utf-8"))
     parameter_config = payload["parameter_set"]
     params = load_parameter_set(parameter_config["path"], parameter_config["parameter_set_id"])
@@ -61,10 +62,13 @@ def main() -> None:
             session = TradingSessionService(repos, gateway).resolve(symbol, trade_date)
             HistoricalBarService(repos, gateway).load_or_fetch(symbol, session)
         assert session is not None
-        context = RunContext(payload.get("run_id", str(uuid.uuid4())), symbol, trade_date, params,
+        run_id = DefaultIdGenerator().new_run_id(
+            started_at_local, symbol, params.parameter_set_id
+        )
+        context = RunContext(run_id, symbol, trade_date, params,
             Direction(payload["direction"]), float(payload["initial_threshold"]),
             float(payload.get("active_threshold", payload["initial_threshold"])), RunMode.BACKTEST, None,
-            datetime.now().astimezone())
+            started_at_local)
         summary = SingleDayRunner(db, repos).execute_run(context, BacktestFeed(symbol, session, repos), RuntimeState.empty(params))
         print(json.dumps({"run_id": summary.run_id, "status": summary.status.value, "processed_bar_count": summary.processed_bar_count, "signal_count": summary.signal_count}))
     finally:
