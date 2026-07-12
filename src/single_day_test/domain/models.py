@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 
 from .enums import (
@@ -63,15 +63,23 @@ class RunContext:
 @dataclass(frozen=True)
 class RawBar:
     symbol: str
-    timestamp_et: datetime
+    date: int
     open: float
     high: float
     low: float
     close: float
     volume: float
+    wap: float
+    barCount: int
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "timestamp_et", _normalize_dt(self.timestamp_et))
+        if self.date < 0:
+            raise InputValidationError(f"IBAPI bar date must be a UTC epoch second: {self.date}")
+
+    @property
+    def timestamp_et(self) -> datetime:
+        """Derived ET view; persisted raw data remains the IBAPI epoch value."""
+        return datetime.fromtimestamp(self.date, tz=timezone.utc).astimezone(_ET)
 
 
 @dataclass(frozen=True)

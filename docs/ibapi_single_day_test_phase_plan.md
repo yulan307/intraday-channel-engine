@@ -455,6 +455,10 @@ Backtest 数据自动补齐
 
 该 Phase 不接实时行情。
 
+实施状态：已实现。历史数据的原始契约固定为 IBAPI `BarData`：UTC epoch
+`date`、OHLC、`volume`、`wap`、`barCount`，并保存请求元数据。旧 Phase 2
+注入格式和 SQLite schema 不兼容。
+
 ## 6.2 首次需要 TWS 的节点
 
 首次真实连接 TWS 的代码位置：

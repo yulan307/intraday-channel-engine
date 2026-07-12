@@ -76,8 +76,8 @@ def _make_params(**overrides):
 def _make_rawbar(ts=None, **kw):
     if ts is None:
         ts = datetime(2025, 1, 15, 10, 0, tzinfo=ET)
-    base = dict(symbol="AAPL", timestamp_et=ts, open=100.0, high=101.0, low=99.0,
-                close=100.5, volume=1000)
+    base = dict(symbol="AAPL", date=int(ts.timestamp()), open=100.0, high=101.0, low=99.0,
+                close=100.5, volume=1000, wap=100.25, barCount=10)
     base.update(kw)
     return RawBar(**base)
 
@@ -378,8 +378,8 @@ def _runctx_factory(dt):
 
 
 def _rawbar_factory(dt):
-    return RawBar(symbol="AAPL", timestamp_et=dt, open=100.0, high=101.0,
-                  low=99.0, close=100.5, volume=1000)
+    return RawBar(symbol="AAPL", date=int(dt.timestamp()), open=100.0, high=101.0,
+                  low=99.0, close=100.5, volume=1000, wap=100.25, barCount=10)
 
 
 def _trendbar_factory(dt):
@@ -467,7 +467,6 @@ def _runsumm_end_factory(dt):
 
 DATETIME_CASES = [
     (_runctx_factory, "started_at_et"),
-    (_rawbar_factory, "timestamp_et"),
     (_trendbar_factory, "timestamp_et"),
     (_channelbar_factory, "timestamp_et"),
     (_tssession_start_factory, "session_start_et"),

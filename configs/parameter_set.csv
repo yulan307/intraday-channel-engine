@@ -1,0 +1,2 @@
+parameter_set_id,trend_window,slope_std_window,dev_window,residual_window,r2_threshold,channel_high_percentile,channel_low_percentile,continuous_break_count
+mu-phase3-v1,30,30,30,30,0.6,95,95,2

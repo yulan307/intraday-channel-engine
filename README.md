@@ -1,14 +1,30 @@
-# Intraday Channel Engine – Phase 1
+# Intraday Channel Engine – Phase 3
 
-Phase 1 implements the project skeleton, domain models, runtime states, and the
-pure Regression, Trend, Channel, and Decision algorithms.
+Phase 3 uses IBAPI as the only raw-market-data contract. Historical `BarData`
+is persisted in SQLite with its native fields: UTC epoch `date`, OHLC,
+`volume`, `wap`, and `barCount`, plus request provenance (`bar_size`,
+`what_to_show`, and `use_rth`). ET timestamps are derived only for RTH checks
+and strategy processing.
 
-**No database, no IBAPI/TWS, no BarFeed implementation, no application runner,
-no orders, and no recovery.**
+Run parameters are supplied in a JSON request containing `symbol`,
+`trade_date`, `direction`, `initial_threshold`, and a `parameter_set` object
+with only `path` and `parameter_set_id`. The selected row is loaded from the
+central [configs/parameter_set.csv](D:\Codes\Intrady_Channel_Engine\configs\parameter_set.csv). The run
+uses validated local IBAPI data when present; otherwise it connects to TWS,
+resolves the RTH schedule through `SCHEDULE`, fetches RTH 1-minute `TRADES`
+bars, validates them, and stores them before running the strategy.
 
-The Core Engine is IO-free: it receives explicit domain inputs and returns
-result objects plus next state. `DecisionTransition` keeps a signal bar's
-recorded break count separate from the state to apply only after that bar has
-been persisted.
+Install the official IBKR TWS API Python client before running this project.
+The PyPI `ibapi==9.81.1.post1` package is too old for `SCHEDULE` and must not
+be used. This checkout is validated with official API 10.48.1; API 10.12 or
+newer is required. Download the current official Windows API installer, then
+install its extracted `source/pythonclient` directory into `.venv` with pip.
 
-See `docs/` for design documents and `CONTEXT` for current state.
+Configure `configs/ib.yaml` with independent `paper` and `live` TWS profiles.
+Use `--ib-environment paper` (default) or `--ib-environment live` when a fetch
+is required. Initialize a new database with
+`python -m single_day_test.application.backtest_cli init-db`. A legacy
+Phase 2 database is rejected; the one-time destructive reset is
+`init-db --rebuild-legacy`.
+
+No live subscription, orders, recovery, or checkpointing is included.
