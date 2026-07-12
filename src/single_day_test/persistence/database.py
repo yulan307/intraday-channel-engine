@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import sqlite3
 from collections.abc import Iterator, Sequence
@@ -12,7 +13,8 @@ from ..domain.enums import RunStatus
 from ..domain.errors import PersistenceError
 from ..domain.models import ProcessedBarRecord, RawBar, RunContext, RunSummary, SignalEvent, TradingSession
 
-SCHEMA_VERSION = "phase3_ibapi_v1"
+SCHEMA_VERSION = "phase3_ibapi_v5"
+PREVIOUS_SCHEMA_VERSIONS = {"phase3_ibapi_v1", "phase3_ibapi_v2", "phase3_ibapi_v3", "phase3_ibapi_v4"}
 
 
 class Database:
@@ -41,6 +43,10 @@ class Database:
             version = self.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
             if version is not None and version[0] == SCHEMA_VERSION:
                 return
+            if version is not None and version[0] in PREVIOUS_SCHEMA_VERSIONS:
+                # The previous processed-bar shape is intentionally not migrated.
+                # Clear it once and recreate the Phase 3 schema with fixed columns.
+                self._drop_all()
         has_legacy = self.connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='raw_1m_bar'").fetchone() is not None
         if has_legacy and not self.rebuild_legacy:
             raise PersistenceError("Legacy Phase 2 database detected. Reset it explicitly; automatic migration is unsupported.")
@@ -65,11 +71,28 @@ class Database:
           active_threshold REAL NOT NULL, status TEXT NOT NULL, started_at_epoch INTEGER NOT NULL,
           ended_at_epoch INTEGER, error_type TEXT, error_message TEXT);
         CREATE TABLE processed_1m_bar (
-          run_id TEXT NOT NULL, date INTEGER NOT NULL, symbol TEXT NOT NULL, trade_date TEXT NOT NULL,
+          run_id TEXT NOT NULL, date INTEGER NOT NULL, timestamp TEXT NOT NULL, symbol TEXT NOT NULL, trade_date TEXT NOT NULL,
           mode TEXT NOT NULL, bar_source TEXT NOT NULL, direction TEXT NOT NULL, parameter_set_id TEXT NOT NULL,
-          parameter_snapshot_json TEXT NOT NULL, initial_threshold REAL NOT NULL, active_threshold REAL NOT NULL,
-          open REAL NOT NULL, high REAL NOT NULL, low REAL NOT NULL, close REAL NOT NULL, volume REAL NOT NULL,
-          trend_json TEXT NOT NULL, channel_json TEXT NOT NULL, decision_json TEXT NOT NULL,
+          trend_window INTEGER NOT NULL, slope_std_window INTEGER NOT NULL, dev_window INTEGER NOT NULL,
+          residual_window INTEGER NOT NULL, r2_threshold REAL NOT NULL,
+          channel_high_percentile REAL NOT NULL, channel_low_percentile REAL NOT NULL,
+          continuous_break_count INTEGER NOT NULL,
+          initial_threshold REAL NOT NULL, active_threshold REAL NOT NULL,
+          open REAL NOT NULL, high REAL NOT NULL, low REAL NOT NULL, close REAL NOT NULL,
+          volume REAL NOT NULL, wap REAL NOT NULL, bar_count INTEGER NOT NULL,
+          bar_size TEXT NOT NULL, what_to_show TEXT NOT NULL, use_rth INTEGER NOT NULL,
+          source TEXT NOT NULL,
+          trend_price REAL NOT NULL, trend_slope REAL, trend_r2 REAL, trend_slope_rmse REAL,
+          trend_slope_std REAL, trend_fit_ok INTEGER, trend_raw_trend TEXT,
+          trend_stack_length_after INTEGER NOT NULL,
+          channel_pred_high REAL, channel_pred_low REAL, channel_effective_trend TEXT,
+          channel_last_trend_slope REAL, channel_last_trend_intercept REAL,
+          channel_last_trend_bar_count INTEGER, channel_last_high_percentile REAL,
+          channel_last_low_percentile REAL, channel_curr_trend_slope REAL,
+          channel_curr_trend_intercept REAL, channel_curr_high_percentile REAL,
+          channel_curr_low_percentile REAL, channel_stack_length_after INTEGER NOT NULL,
+          decision TEXT NOT NULL, decision_recorded_break_count INTEGER NOT NULL,
+          decision_triggered INTEGER NOT NULL,
           PRIMARY KEY(run_id, date));
         CREATE TABLE signal_event (
           run_id TEXT NOT NULL, date INTEGER NOT NULL, decision TEXT NOT NULL, price REAL NOT NULL,
@@ -146,10 +169,71 @@ class SqliteRepositories:
         epoch = _epoch(value.timestamp_et)
         if isinstance(value, SignalEvent):
             self.database.connection.execute('INSERT INTO signal_event VALUES (?, ?, ?, ?, ?)', (value.run_id,epoch,value.decision.value,value.price,value.break_count)); return
-        self.database.connection.execute('INSERT INTO processed_1m_bar VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (value.run_id,epoch,value.symbol,value.trade_date.isoformat(),value.mode.value,value.bar_source.value,value.direction.value,value.parameter_set_id,json.dumps(value.parameter_snapshot),value.initial_threshold,value.active_threshold,value.open,value.high,value.low,value.close,value.volume,json.dumps(value.trend.__dict__,default=str),json.dumps(value.channel.__dict__,default=str),json.dumps(value.decision.__dict__,default=str)))
+        parameter = value.parameter_snapshot
+        trend = value.trend
+        channel = value.channel
+        decision = value.decision
+        self.database.connection.execute('''
+            INSERT INTO processed_1m_bar (
+              run_id, date, timestamp, symbol, trade_date, mode, bar_source, direction, parameter_set_id,
+              trend_window, slope_std_window, dev_window, residual_window, r2_threshold,
+              channel_high_percentile, channel_low_percentile, continuous_break_count,
+              initial_threshold, active_threshold, open, high, low, close, volume, wap, bar_count,
+              bar_size, what_to_show, use_rth, source,
+              trend_price, trend_slope, trend_r2, trend_slope_rmse, trend_slope_std,
+              trend_fit_ok, trend_raw_trend, trend_stack_length_after,
+              channel_pred_high, channel_pred_low, channel_effective_trend,
+              channel_last_trend_slope, channel_last_trend_intercept, channel_last_trend_bar_count,
+              channel_last_high_percentile, channel_last_low_percentile, channel_curr_trend_slope,
+              channel_curr_trend_intercept, channel_curr_high_percentile, channel_curr_low_percentile,
+              channel_stack_length_after, decision, decision_recorded_break_count, decision_triggered
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?,
+              ?, ?, ?, ?, ?, ?, ?,
+              ?, ?, ?, ?, ?, ?, ?,
+              ?, ?, ?, ?, ?, ?, ?,
+              ?, ?, ?, ?, ?, ?, ?,
+              ?, ?, ?, ?, ?, ?, ?,
+              ?, ?, ?, ?, ?,
+              ?, ?, ?, ?, ?, ?, ?
+            )
+        ''', (
+            value.run_id, epoch, value.timestamp_et.replace(second=0, microsecond=0).isoformat(),
+            value.symbol, value.trade_date.isoformat(), value.mode.value,
+            value.bar_source.value, value.direction.value, value.parameter_set_id,
+            parameter['trend_window'], parameter['slope_std_window'], parameter['dev_window'],
+            parameter['residual_window'], parameter['r2_threshold'],
+            parameter['channel_high_percentile'], parameter['channel_low_percentile'],
+            parameter['continuous_break_count'], value.initial_threshold, value.active_threshold,
+            value.open, value.high, value.low, value.close, value.volume, value.wap, value.barCount,
+            '1 min', 'TRADES', 1, 'ibapi',
+            trend.price, trend.slope, trend.r2, trend.slope_rmse, trend.slope_std,
+            None if trend.trend_fit_ok is None else int(trend.trend_fit_ok),
+            trend.raw_trend.value if trend.raw_trend is not None else None,
+            trend.trend_stack_length_after, channel.pred_high, channel.pred_low,
+            channel.effective_trend.value if channel.effective_trend is not None else None,
+            channel.last_trend_slope, channel.last_trend_intercept, channel.last_trend_bar_count,
+            channel.last_high_percentile, channel.last_low_percentile, channel.curr_trend_slope,
+            channel.curr_trend_intercept, channel.curr_high_percentile, channel.curr_low_percentile,
+            channel.channel_stack_length_after, decision.decision.value,
+            decision.recorded_break_count, int(decision.triggered),
+        ))
 
     def save_summary(self, summary: RunSummary) -> None:
         with self.database.transaction(): self.database.connection.execute('INSERT INTO run_summary VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (summary.run_id,summary.status.value,summary.processed_bar_count,summary.signal_count,summary.final_curr_slope,summary.final_curr_intercept,summary.final_high_percentile,summary.final_low_percentile,summary.final_channel_length,_epoch(summary.started_at_et),_epoch(summary.ended_at_et),summary.error_type,summary.error_message))
+
+    def export_processed_run_csv(self, run_id: str, output_dir: str | Path = Path("data")) -> Path:
+        rows = self.database.connection.execute(
+            'SELECT * FROM processed_1m_bar WHERE run_id=? ORDER BY date', (run_id,)
+        ).fetchall()
+        fieldnames = [column[1] for column in self.database.connection.execute('PRAGMA table_info(processed_1m_bar)')]
+        destination = Path(output_dir) / f'{run_id}.csv'
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with destination.open('w', newline='', encoding='utf-8') as stream:
+            writer = csv.DictWriter(stream, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(dict(row) for row in rows)
+        return destination
 
 
 def session_tz() -> ZoneInfo:

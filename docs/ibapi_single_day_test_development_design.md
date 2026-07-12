@@ -1785,6 +1785,34 @@ error_message           TEXT NULL
 
 ### 21.4 `processed_1m_bar`
 
+Phase 3 current-state rule: this table is fully columnar. It includes all
+`RawBar` fields (`symbol`, `date`, `open`, `high`, `low`, `close`, `volume`,
+`wap`, and `bar_count`) plus raw request metadata (`bar_size`, `what_to_show`,
+`use_rth`, and `source`), run metadata, parameter snapshot columns, and
+dedicated columns for every `TrendResult`, `ChannelResult`, and
+`DecisionResult` field. The result fields use `trend_`, `channel_`, and
+`decision_` prefixes. The table must not contain or persist the original
+`parameter_snapshot_json`, `trend_json`, `channel_json`, or `decision_json`.
+
+The schema version is `phase3_ibapi_v5`. Existing `phase3_ibapi_v1`,
+`phase3_ibapi_v2`, `phase3_ibapi_v3`, and `phase3_ibapi_v4` data is
+cleared once during initialization rather than migrated.
+
+Timestamp naming rule: persisted database columns do not use the `_et`
+suffix. Runtime aware datetimes normalized to `America/New_York` may use
+`_et`; the raw IBAPI `date` field remains a UTC Unix epoch second. A persisted
+timestamp column, when needed, is named `timestamp` and its storage
+representation is documented explicitly.
+The `processed_1m_bar` schema must contain no column whose name ends with `_et`.
+The `timestamp` column stores the `America/New_York` bar timestamp at
+`bar_size` precision; Phase 3 uses `1 min`, with zero seconds and microseconds.
+The raw UTC epoch remains in `date`.
+
+At run completion, export the rows for that `run_id` to `data/<run_id>.csv`.
+The CSV header and field order are derived from `processed_1m_bar`, so they
+match the SQLite schema exactly. The export does not replace or delete SQLite
+data.
+
 建议将 Trend、Channel、Decision 字段直接展开为列，便于回测查询和绘图。
 
 核心唯一键：

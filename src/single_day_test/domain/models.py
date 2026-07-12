@@ -178,6 +178,8 @@ class ProcessedBarRecord:
     low: float
     close: float
     volume: float
+    wap: float
+    barCount: int
     trend: TrendResult
     channel: ChannelResult
     decision: DecisionResult

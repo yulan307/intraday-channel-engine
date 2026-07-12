@@ -11,6 +11,24 @@ Implemented scope:
 - SQLite records IBAPI trading schedules, canonical raw bars, strategy output,
   signals, runs, and summaries. Phase 2 schema compatibility is deliberately
   removed; legacy data is rejected after the one-time rebuild.
+- `processed_1m_bar` uses schema version `phase3_ibapi_v5`: it preserves every
+  `RawBar` fields (`date`, OHLC, `volume`, `wap`, and `barCount`) plus raw
+  request metadata (`bar_size`, `what_to_show`, `use_rth`, and `source`) as columns and
+  expands parameter, Trend, Channel, and Decision JSON payloads into columns.
+  No original JSON payload columns are retained. Existing `phase3_ibapi_v1`
+  data is cleared once during initialization because it is not migrated.
+- Timestamp naming rule: persisted database columns do not use the `_et`
+  suffix. Runtime aware datetimes normalized to `America/New_York` may use
+  `_et`; raw IBAPI `date` remains a UTC Unix epoch second. A persisted
+  timestamp column is named `timestamp` and documents its representation.
+  `processed_1m_bar` must contain no column whose name ends with `_et`. Existing
+  v1/v2/v3/v4 data is cleared once during initialization because it is not
+  migrated. The table stores `timestamp` as an America/New_York ISO timestamp
+  truncated to the configured bar size; Phase 3 1-minute bars have zero
+  seconds and microseconds.
+- Each completed run exports its `processed_1m_bar` rows to `data/<run_id>.csv`.
+  The CSV header and field order are read directly from the SQLite table, so its
+  fields exactly match the persisted schema; SQLite storage remains unchanged.
 - `IbApiGateway` connects to TWS using the selected `configs/ib.yaml` paper or
   live profile, coordinates callback request IDs, maps
   errors/timeouts/disconnects to domain errors, resolves `SCHEDULE`, and

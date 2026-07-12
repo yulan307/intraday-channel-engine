@@ -440,6 +440,47 @@ Phase 2 中，若本地数据不完整：
 
 # Phase 3：IBAPI 历史数据与交易日接入
 
+### `processed_1m_bar` persistence schema rule
+
+### Timestamp naming and timezone rule
+
+Persisted database column names must not use the `_et` suffix. The `_et`
+suffix is reserved for runtime domain fields whose value is a timezone-aware
+`datetime` normalized to `America/New_York`, such as `timestamp_et`,
+`session_start_et`, and `session_end_et`. IBAPI raw bar `date` remains a UTC
+Unix epoch second and must retain the raw field name; it must not be renamed
+to `timestamp_et`. If a timestamp is persisted as a database column, use the
+name `timestamp` and document its storage representation explicitly.
+
+Phase 3 requires `processed_1m_bar` to preserve every `RawBar` field as a
+queryable column: `symbol`, `date`, `open`, `high`, `low`, `close`, `volume`,
+`wap`, and `barCount` (stored as `bar_count`). The processed result must not
+store the original JSON representation. Every field from the parameter
+snapshot, `TrendResult`, `ChannelResult`, and `DecisionResult` is expanded
+into a dedicated column with a stable prefix where needed (`trend_`,
+`channel_`, and `decision_`).
+
+The current `processed_1m_bar` schema is `phase3_ibapi_v5`. It also preserves
+the raw request metadata `bar_size`, `what_to_show`, `use_rth`, and `source`.
+The previous `phase3_ibapi_v1`, `phase3_ibapi_v2`, `phase3_ibapi_v3`, and `phase3_ibapi_v4` schemas are incompatible
+and are cleared once during database
+initialization; its data is intentionally not migrated or retained. No JSON
+columns (`parameter_snapshot_json`, `trend_json`, `channel_json`, or
+`decision_json`) are allowed in the current table.
+
+The current `processed_1m_bar` table must contain no column whose name ends
+with `_et`. ET timezone semantics belong only to runtime aware datetime fields; they
+must not be written into the processed-bar table schema.
+
+`processed_1m_bar.timestamp` is the bar's `America/New_York` timestamp. It is
+stored with precision matching `bar_size`; Phase 3 uses `1 min`, so seconds
+and microseconds are zero. The raw UTC epoch remains available in `date`.
+
+After each run, export that run's persisted `processed_1m_bar` rows to
+`data/<run_id>.csv`. The CSV field names and order must exactly match the
+SQLite table. This export is additive: the existing SQLite persistence remains
+unchanged and authoritative.
+
 ## 6.1 目标
 
 首次接入 TWS。
