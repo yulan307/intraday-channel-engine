@@ -30,6 +30,13 @@ choose another directory. The JSONL file records run creation, committed Bars,
 signals, completion, and failure. The final real-TWS full-day validation is
 performed manually; the automated suite uses fake clocks and feeds.
 
+Live startup defaults are stored in `configs/live_config.yaml`. Start without
+strategy arguments to use that YAML file; an explicitly supplied CLI option
+overrides only its matching YAML field. `trade_date` is an optional ET date and
+maps to `--trade-date`; null selects today or the next tradable session after
+today's close. `ib_environment` selects the existing paper/live connection
+profile in `configs/ib.yaml`.
+
 `processed_1m_bar` preserves the Phase 3 v5 column shape except for the
 removed `initial_threshold` column. It keeps all RawBar, request-provenance,
 parameter, Trend, Channel, and Decision fields as queryable columns.
