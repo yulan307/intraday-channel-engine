@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import argparse
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
 
-from single_day_test.application.backtest_cli import parse_scan_request
-from single_day_test.application.backtest_scan import BacktestScanner
+from single_day_test.application.backtest_cli import BacktestScanner, resolve_backtest_launch_config
 from single_day_test.application.bar_processor import process_bar
 from single_day_test.bar_feed.base import FeedEvent
 from single_day_test.domain.enums import BarSource, DecisionLabel, Direction, FeedStatus, RunMode, RunStatus, ThresholdMode
@@ -122,22 +122,71 @@ def test_fixed_signal_preserves_trend_and_channel_state() -> None:
     assert len(transition.next_state_after_persist.channel.bars) == 1
 
 
-def test_parse_scan_request_enforces_dates_threshold_and_generated_run_id() -> None:
-    payload = {
-        "symbol": "AAPL", "direction": "SELL", "trade_date_start": "2025-01-02",
-        "trade_date_end": "2025-01-03", "threshold": 0,
-        "parameter_set": {"path": "configs/parameter_set.csv", "parameter_set_id": ""},
+def _backtest_args(config: Path, **overrides: object) -> argparse.Namespace:
+    values: dict[str, object] = {
+        "config": config, "symbol": None, "direction": None, "threshold": None,
+        "parameter_set_path": None, "parameter_set_id": None, "trade_date_start": None,
+        "trade_date_end": None, "ib_environment": None, "database": None, "ib_config": None,
     }
-    request, selected_id, path = parse_scan_request(payload, date(2025, 1, 3))
-    assert request.threshold_mode is ThresholdMode.FIXED and request.fixed_threshold == 0.0
-    assert request.trade_dates == (date(2025, 1, 2), date(2025, 1, 3))
-    assert selected_id == "" and path == Path("configs/parameter_set.csv")
-    with pytest.raises(InputValidationError):
-        parse_scan_request({**payload, "run_id": "forbidden"}, date(2025, 1, 3))
-    with pytest.raises(InputValidationError):
-        parse_scan_request({**payload, "threshold": ""}, date(2025, 1, 3))
-    with pytest.raises(InputValidationError):
-        parse_scan_request({**payload, "trade_date_end": "2025-01-04"}, date(2025, 1, 3))
+    values.update(overrides)
+    return argparse.Namespace(**values)
+
+
+def test_yaml_backtest_config_applies_defaults_and_cli_overrides(tmp_path: Path) -> None:
+    path = tmp_path / "backtest.yaml"
+    path.write_text(
+        "symbol: AAPL\ndirection: SELL\nthreshold: 0\nparameter_set_path: configs/parameter_set.csv\n"
+        "parameter_set_id: ''\ntrade_date_start: 2025-01-02\ntrade_date_end: 2025-01-03\n"
+        "ib_environment: paper\ndatabase: data/test.sqlite3\nib_config: configs/ib.yaml\n",
+        encoding="utf-8",
+    )
+    configured = resolve_backtest_launch_config(_backtest_args(path), date(2025, 1, 3))
+    assert configured.request.symbol == "AAPL"
+    assert configured.request.threshold_mode is ThresholdMode.FIXED
+    assert configured.request.fixed_threshold == 0.0
+    assert configured.request.trade_dates == (date(2025, 1, 2), date(2025, 1, 3))
+    assert configured.parameter_set_id == ""
+    overridden = resolve_backtest_launch_config(
+        _backtest_args(
+            path, symbol="MSFT", direction="BUY", threshold=150.0,
+            parameter_set_path=Path("other.csv"), parameter_set_id="p1",
+            trade_date_start=date(2025, 1, 3), trade_date_end=date(2025, 1, 3),
+            ib_environment="live", database=Path("other.sqlite3"), ib_config=Path("other-ib.yaml"),
+        ),
+        date(2025, 1, 3),
+    )
+    assert overridden.request.symbol == "MSFT"
+    assert overridden.request.direction is Direction.BUY
+    assert overridden.request.fixed_threshold == 150.0
+    assert overridden.parameter_set_path == Path("other.csv")
+    assert overridden.parameter_set_id == "p1"
+    assert overridden.request.trade_dates == (date(2025, 1, 3),)
+    assert overridden.ib_environment == "live"
+    assert overridden.database == Path("other.sqlite3")
+    assert overridden.ib_config == Path("other-ib.yaml")
+
+
+def test_yaml_backtest_config_rejects_unknown_or_invalid_values(tmp_path: Path) -> None:
+    path = tmp_path / "backtest.yaml"
+    path.write_text("symbol: AAPL\nunknown: value\n", encoding="utf-8")
+    with pytest.raises(InputValidationError, match="unsupported fields"):
+        resolve_backtest_launch_config(_backtest_args(path), date(2025, 1, 3))
+    path.write_text(
+        "symbol: AAPL\ndirection: BUY\nthreshold: ''\nparameter_set_path: params.csv\nparameter_set_id: p1\n"
+        "trade_date_start: 2025-01-03\ntrade_date_end: 2025-01-02\nib_environment: paper\ndatabase: test.sqlite3\nib_config: ib.yaml\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(InputValidationError, match="threshold"):
+        resolve_backtest_launch_config(_backtest_args(path), date(2025, 1, 3))
+    path.write_text(path.read_text(encoding="utf-8").replace("threshold: ''", "threshold: null"), encoding="utf-8")
+    with pytest.raises(InputValidationError, match="must not be later"):
+        resolve_backtest_launch_config(_backtest_args(path), date(2025, 1, 3))
+    path.write_text(path.read_text(encoding="utf-8").replace("trade_date_end: 2025-01-02", "trade_date_end: 2025-01-04"), encoding="utf-8")
+    with pytest.raises(InputValidationError, match="later than the current ET date"):
+        resolve_backtest_launch_config(_backtest_args(path), date(2025, 1, 3))
+    path.write_text(path.read_text(encoding="utf-8").replace("trade_date_start: 2025-01-03", "trade_date_start: not-a-date").replace("trade_date_end: 2025-01-04", "trade_date_end: null"), encoding="utf-8")
+    with pytest.raises(InputValidationError, match="trade_date_start"):
+        resolve_backtest_launch_config(_backtest_args(path), date(2025, 1, 3))
 
 
 class _Feed:

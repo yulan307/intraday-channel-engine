@@ -1,0 +1,28 @@
+# Phase 3 historical-backtest defaults.
+# Run with these values:
+#   python -m single_day_test.application.backtest_cli
+# Use another YAML file:
+#   python -m single_day_test.application.backtest_cli --config path/to/backtest.yaml
+# Any explicitly supplied CLI option overrides only that YAML field:
+#   python -m single_day_test.application.backtest_cli --parameter-set-id another-set
+
+symbol: MU
+direction: BUY
+
+# A number selects Fixed Threshold; null selects Auto Threshold.
+threshold: null
+
+# An empty parameter_set_id scans every parameter CSV row with is_active = 1.
+# A non-empty ID selects exactly that row, even when it is inactive.
+parameter_set_path: configs/parameter_set.csv
+parameter_set_id: mu-phase3-v1
+
+# Supply either date for one-day processing. Supply both dates for an inclusive scan.
+# If one date and one non-empty parameter_set_id resolve, exactly one daily backtest runs.
+trade_date_start: 2026-07-13
+trade_date_end: null
+
+# Selects the existing paper/live connection profile in configs/ib.yaml.
+ib_environment: paper
+database: data/intraday_channel.sqlite3
+ib_config: configs/ib.yaml

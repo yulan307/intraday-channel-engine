@@ -210,7 +210,9 @@ must be handled in a later review round rather than added to this archive.
 
 Phase 5 continues to use `src/single_day_test/application/live_cli.py` as the
 official entry point. Its existing CLI surface is retained, while its internal
-verification loop is replaced by the complete `SingleDayRunner` flow.
+verification loop is replaced by the complete `SingleDayRunner` flow. On
+Windows, `./run_live.ps1` launches this CLI through the project `.venv` and
+forwards `--help` and every CLI override unchanged.
 
 ### 8.2 Run ID
 

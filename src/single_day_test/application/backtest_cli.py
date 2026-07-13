@@ -1,57 +1,173 @@
-"""Phase 3 multi-parameter, multi-date historical backtest CLI."""
+"""Phase 3 historical backtest CLI with YAML defaults and CLI overrides."""
 from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
+
+import yaml
 
 from ..bar_feed.backtest_feed import BacktestFeed
 from ..bar_feed.bar_validation import validate_complete_backtest_day
-from ..domain.enums import Direction, ThresholdMode
-from ..domain.errors import InputValidationError
-from ..domain.parameters import load_parameter_sets
+from ..bar_feed.base import BarFeed
+from ..domain.enums import Direction, RunMode, ThresholdMode
+from ..domain.errors import InputValidationError, NonTradingDayError
+from ..domain.models import RunContext, RunSummary
+from ..domain.parameters import ParameterSet, load_parameter_sets
+from ..domain.states import RuntimeState
 from ..ib.config import IbConfig
 from ..ib.gateway import IbApiGateway
 from ..ib.services import HistoricalBarService, TradingSessionService
 from ..persistence.database import Database, SqliteRepositories
-from ..support.ids import DefaultIdGenerator
-from .backtest_scan import BacktestScanRequest, BacktestScanner
+from ..support.clock import SystemClock
+from ..support.ids import DefaultIdGenerator, IdGenerator
+from .single_day_runner import SingleDayRunner
+from .summary_service import build_failed_summary, build_skipped_summary
 
-DEFAULT_DATABASE = Path("data/intraday_channel.sqlite3")
-DEFAULT_IB_CONFIG = Path("configs/ib.yaml")
+
+DEFAULT_BACKTEST_CONFIG = Path("configs/backtest.yaml")
 _ET = ZoneInfo("America/New_York")
+_BACKTEST_CONFIG_FIELDS = {
+    "symbol", "direction", "threshold", "parameter_set_path", "parameter_set_id",
+    "trade_date_start", "trade_date_end", "ib_environment", "database", "ib_config",
+}
+
+
+@dataclass(frozen=True)
+class BacktestScanRequest:
+    symbol: str
+    direction: Direction
+    trade_dates: tuple[date, ...]
+    threshold_mode: ThresholdMode
+    fixed_threshold: float | None
+
+
+@dataclass(frozen=True)
+class BacktestLaunchConfig:
+    request: BacktestScanRequest
+    parameter_set_path: Path
+    parameter_set_id: str | None
+    ib_environment: str
+    database: Path
+    ib_config: Path
+
+
+class BacktestScanner:
+    """Run independent daily backtests for each selected parameter set."""
+
+    def __init__(
+        self,
+        database: Database,
+        repositories: SqliteRepositories,
+        id_generator: IdGenerator,
+        started_at_local: datetime,
+        feed_factory: Callable[[str, date], BarFeed],
+        output_dir: Path = Path("data"),
+    ) -> None:
+        self.database = database
+        self.repositories = repositories
+        self.id_generator = id_generator
+        self.started_at_local = started_at_local
+        self.feed_factory = feed_factory
+        self.output_dir = output_dir
+
+    def execute(
+        self, request: BacktestScanRequest, parameter_sets: Sequence[ParameterSet]
+    ) -> list[RunSummary]:
+        summaries: list[RunSummary] = []
+        runner = SingleDayRunner(self.database, self.repositories, SystemClock())
+        for params in parameter_sets:
+            run_id = self.id_generator.new_run_id(
+                self.started_at_local, request.symbol, params.parameter_set_id
+            )
+            for trade_date in request.trade_dates:
+                context = RunContext(
+                    run_id, request.symbol, trade_date, params, request.direction,
+                    request.threshold_mode, request.fixed_threshold, RunMode.BACKTEST,
+                    None, self.started_at_local,
+                )
+                state = RuntimeState.empty(params, request.fixed_threshold)
+                self.repositories.create(context)
+                try:
+                    feed = self.feed_factory(request.symbol, trade_date)
+                except NonTradingDayError as exc:
+                    ended = datetime.now().astimezone()
+                    self.repositories.mark_skipped(context, str(exc))
+                    summary = build_skipped_summary(context, state, ended, str(exc))
+                    self.repositories.save_summary(summary)
+                    summaries.append(summary)
+                    continue
+                except Exception as exc:
+                    ended = datetime.now().astimezone()
+                    self.repositories.mark_failed(context.run_id, context.trade_date, ended, type(exc).__name__, str(exc))
+                    summaries.append(build_failed_summary(context, state, exc, ended))
+                    self.repositories.save_summary(summaries[-1])
+                    continue
+                try:
+                    summaries.append(runner.execute_run(context, feed, state, create_run=False))
+                except Exception:
+                    continue
+            self.repositories.export_processed_run_csv(run_id, self.output_dir)
+        return summaries
 
 
 def _args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    subcommands = parser.add_subparsers(dest="command", required=True)
-    init = subcommands.add_parser("init-db")
-    init.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
-    init.add_argument("--rebuild-legacy", action="store_true", help="Compatibility option; incompatible schemas are rebuilt automatically")
-    run = subcommands.add_parser("run")
-    run.add_argument("--database", type=Path, default=DEFAULT_DATABASE)
-    run.add_argument("--request", type=Path, required=True, help="JSON: symbol, direction, trade_date_start/end, threshold, parameter_set.path/id")
-    run.add_argument("--ib-config", type=Path, default=DEFAULT_IB_CONFIG)
-    run.add_argument("--ib-environment", choices=("paper", "live"), default="paper")
+    parser.add_argument("--config", type=Path, default=DEFAULT_BACKTEST_CONFIG)
+    parser.add_argument("--symbol")
+    parser.add_argument("--direction", choices=("BUY", "SELL"))
+    parser.add_argument("--threshold", type=float)
+    parser.add_argument("--parameter-set-path", type=Path)
+    parser.add_argument("--parameter-set-id")
+    parser.add_argument("--trade-date-start", type=date.fromisoformat)
+    parser.add_argument("--trade-date-end", type=date.fromisoformat)
+    parser.add_argument("--ib-environment", choices=("paper", "live"))
+    parser.add_argument("--database", type=Path)
+    parser.add_argument("--ib-config", type=Path)
     return parser.parse_args()
 
 
-def _parse_dates(payload: dict[str, object], today_et: date) -> tuple[date, ...]:
-    start_raw = payload.get("trade_date_start")
-    end_raw = payload.get("trade_date_end")
-    if start_raw is None and end_raw is None:
-        raise InputValidationError("One of trade_date_start or trade_date_end is required")
-    if start_raw is not None and not isinstance(start_raw, str):
-        raise InputValidationError("trade_date_start must be an ISO date string")
-    if end_raw is not None and not isinstance(end_raw, str):
-        raise InputValidationError("trade_date_end must be an ISO date string")
+def load_backtest_config(path: Path) -> dict[str, object]:
     try:
-        start = date.fromisoformat(start_raw) if start_raw is not None else date.fromisoformat(end_raw)  # type: ignore[arg-type]
-        end = date.fromisoformat(end_raw) if end_raw is not None else start
+        document: Any = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise InputValidationError(f"Invalid Backtest config file {path}") from exc
+    if not isinstance(document, dict):
+        raise InputValidationError(f"Backtest config {path} must be a YAML mapping")
+    unknown = set(document) - _BACKTEST_CONFIG_FIELDS
+    if unknown:
+        raise InputValidationError(f"Backtest config {path} has unsupported fields: {', '.join(sorted(unknown))}")
+    return document
+
+
+def _parse_date(value: object, field: str) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        raise InputValidationError(f"{field} must be an ISO date string")
+    if isinstance(value, date):
+        return value
+    if not isinstance(value, str):
+        raise InputValidationError(f"{field} must be an ISO date string")
+    try:
+        return date.fromisoformat(value)
     except ValueError as exc:
-        raise InputValidationError("trade_date_start and trade_date_end must be ISO dates") from exc
+        raise InputValidationError(f"{field} must be an ISO date string") from exc
+
+
+def _parse_dates(start_raw: object, end_raw: object, today_et: date) -> tuple[date, ...]:
+    start = _parse_date(start_raw, "trade_date_start")
+    end = _parse_date(end_raw, "trade_date_end")
+    if start is None and end is None:
+        raise InputValidationError("One of trade_date_start or trade_date_end is required")
+    start = start or end
+    end = end or start
+    assert start is not None and end is not None
     if start > end:
         raise InputValidationError("trade_date_start must not be later than trade_date_end")
     if end > today_et:
@@ -59,20 +175,29 @@ def _parse_dates(payload: dict[str, object], today_et: date) -> tuple[date, ...]
     return tuple(start + timedelta(days=offset) for offset in range((end - start).days + 1))
 
 
-def parse_scan_request(payload: dict[str, object], today_et: date) -> tuple[BacktestScanRequest, str | None, Path]:
-    if "run_id" in payload:
-        raise InputValidationError("request JSON must not contain run_id")
-    symbol = payload.get("symbol")
-    direction = payload.get("direction")
+def resolve_backtest_launch_config(args: argparse.Namespace, today_et: date) -> BacktestLaunchConfig:
+    values = load_backtest_config(args.config)
+
+    def selected(name: str) -> object:
+        override = getattr(args, name)
+        return override if override is not None else values.get(name)
+
+    symbol = selected("symbol")
+    direction = selected("direction")
+    threshold = selected("threshold")
+    parameter_set_path = selected("parameter_set_path")
+    parameter_set_id = selected("parameter_set_id")
+    ib_environment = selected("ib_environment")
+    database = selected("database")
+    ib_config = selected("ib_config")
     if not isinstance(symbol, str) or not symbol.strip():
-        raise InputValidationError("symbol is required and must be one string")
+        raise InputValidationError("symbol is required")
     if not isinstance(direction, str):
         raise InputValidationError("direction is required")
     try:
         parsed_direction = Direction(direction)
     except ValueError as exc:
         raise InputValidationError("direction must be BUY or SELL") from exc
-    threshold = payload.get("threshold")
     if threshold == "":
         raise InputValidationError("threshold must be numeric, null, or omitted; empty string is invalid")
     if threshold is None:
@@ -81,57 +206,54 @@ def parse_scan_request(payload: dict[str, object], today_et: date) -> tuple[Back
         raise InputValidationError("threshold must be numeric, null, or omitted")
     else:
         threshold_mode, fixed_threshold = ThresholdMode.FIXED, float(threshold)
-    parameter_config = payload.get("parameter_set")
-    if not isinstance(parameter_config, dict):
-        raise InputValidationError("parameter_set object is required")
-    path = parameter_config.get("path")
-    selected_id = parameter_config.get("parameter_set_id")
-    if not isinstance(path, str) or not path:
-        raise InputValidationError("parameter_set.path is required")
-    if selected_id is not None and not isinstance(selected_id, str):
-        raise InputValidationError("parameter_set.parameter_set_id must be a string when supplied")
+    if not isinstance(parameter_set_path, (str, Path)) or not str(parameter_set_path):
+        raise InputValidationError("parameter_set_path is required")
+    if parameter_set_id is not None and not isinstance(parameter_set_id, str):
+        raise InputValidationError("parameter_set_id must be a string when supplied")
+    if ib_environment not in ("paper", "live"):
+        raise InputValidationError("ib_environment must be paper or live")
+    if not isinstance(database, (str, Path)) or not str(database):
+        raise InputValidationError("database is required")
+    if not isinstance(ib_config, (str, Path)) or not str(ib_config):
+        raise InputValidationError("ib_config is required")
     request = BacktestScanRequest(
-        symbol.strip(), parsed_direction, _parse_dates(payload, today_et), threshold_mode, fixed_threshold
+        symbol.strip(), parsed_direction,
+        _parse_dates(selected("trade_date_start"), selected("trade_date_end"), today_et),
+        threshold_mode, fixed_threshold,
     )
-    return request, selected_id, Path(path)
+    return BacktestLaunchConfig(
+        request, Path(parameter_set_path), parameter_set_id.strip() if isinstance(parameter_set_id, str) else None,
+        ib_environment, Path(database), Path(ib_config),
+    )
 
 
 def main() -> None:
     args = _args()
-    args.database.parent.mkdir(parents=True, exist_ok=True)
-    if args.command == "init-db":
-        db = Database(args.database, rebuild_legacy=getattr(args, "rebuild_legacy", False))
-        db.initialize()
-        print(f"Initialized Phase 3 Expand schema: {args.database}")
-        return
-    payload = json.loads(args.request.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise InputValidationError("request JSON must be an object")
-    started_at_local = datetime.now().astimezone().replace(microsecond=0)
-    request, selected_id, parameter_path = parse_scan_request(payload, datetime.now(_ET).date())
-    parameter_sets = load_parameter_sets(parameter_path, selected_id)
-    db = Database(args.database, rebuild_legacy=getattr(args, "rebuild_legacy", False))
-    db.initialize()
-    repos = SqliteRepositories(db)
+    config = resolve_backtest_launch_config(args, datetime.now(_ET).date())
+    config.database.parent.mkdir(parents=True, exist_ok=True)
+    parameter_sets = load_parameter_sets(config.parameter_set_path, config.parameter_set_id)
+    database = Database(config.database)
+    database.initialize()
+    repositories = SqliteRepositories(database)
     gateway: IbApiGateway | None = None
 
     def feed_factory(symbol: str, trade_date: date) -> BacktestFeed:
         nonlocal gateway
-        session = repos.get(trade_date)
-        cached = repos.load_rth_bars(symbol, trade_date) if session is not None else []
+        session = repositories.get(trade_date)
+        cached = repositories.load_rth_bars(symbol, trade_date) if session is not None else []
         if session is None or not validate_complete_backtest_day(cached, session):
             if gateway is None:
-                gateway = IbApiGateway(IbConfig.from_yaml(args.ib_config, args.ib_environment))
+                gateway = IbApiGateway(IbConfig.from_yaml(config.ib_config, config.ib_environment))
                 gateway.connect_gateway()
-            session = TradingSessionService(repos, gateway).resolve(symbol, trade_date)
-            HistoricalBarService(repos, gateway).load_or_fetch(symbol, session)
+            session = TradingSessionService(repositories, gateway).resolve(symbol, trade_date)
+            HistoricalBarService(repositories, gateway).load_or_fetch(symbol, session)
         assert session is not None
-        return BacktestFeed(symbol, session, repos)
+        return BacktestFeed(symbol, session, repositories)
 
     try:
         summaries = BacktestScanner(
-            db, repos, DefaultIdGenerator(), started_at_local, feed_factory
-        ).execute(request, parameter_sets)
+            database, repositories, DefaultIdGenerator(), datetime.now().astimezone().replace(microsecond=0), feed_factory
+        ).execute(config.request, parameter_sets)
         print(json.dumps([
             {"run_id": item.run_id, "trade_date": item.trade_date.isoformat(), "status": item.status.value,
              "processed_bar_count": item.processed_bar_count, "signal_count": item.signal_count}
@@ -140,6 +262,7 @@ def main() -> None:
     finally:
         if gateway is not None:
             gateway.disconnect_gateway()
+        database.close()
 
 
 if __name__ == "__main__":
