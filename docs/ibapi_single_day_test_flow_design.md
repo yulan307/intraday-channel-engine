@@ -411,6 +411,9 @@ low <= close
 
 ## 9. Live Paper Bar 准备
 
+> 本节早期 Live Paper flow 已由文末的
+> `Phase 4 Current-State Override (2026-07-14)` 覆盖；实施以该 override 为准。
+
 ### 9.1 盘前启动
 
 盘前启动时：
@@ -1522,3 +1525,80 @@ flowchart TD
     A --> K["任一环节异常"]
     K --> L["保存 FAILED 当日总结<br/>记录错误并退出"]
 ```
+
+---
+
+## Phase 4 Current-State Override (2026-07-14)
+
+本节覆盖本文件之前的 Phase 4 Live Paper flow。
+
+```mermaid
+flowchart TD
+    A["Live CLI"] --> B["Clock.now_et: validate or default start_date"]
+    B --> C["Resolve four dates from trade_date; query and upsert missing IBAPI schedule rows"]
+    C --> D{"Runnable session"}
+    D -->|"before open"| E["Startup timer waits for session_start_et"]
+    D -->|"in session"| F["Start one reqHistoricalData keepUpToDate request"]
+    E --> F
+    F --> G["historicalData -> hist_buffer"]
+    F --> H["Internal updates -> completed live_buffer"]
+    G --> I["historicalDataEnd"]
+    H --> I
+    I --> J["Merge, de-duplicate, sort, fixed-now live_or_hist classification"]
+    J --> K["Validate and upsert raw_1m_bar"]
+    K --> L["output buffer"]
+    F --> M["Later completed Bar"]
+    M --> N["Immediate one-bar classification"]
+    N --> K
+    L --> O{"next_event"}
+    O -->|"Bar exists"| P["BAR_AVAILABLE + CompletedBar"]
+    O -->|"Open session, empty"| Q["BAR_WAITING"]
+    Q --> R["Consumer wait_for_change"]
+    R --> O
+    O -->|"END Bar extracted"| S["BAR_END"]
+    S --> T["finally: cancel request"]
+```
+
+### 日期与启动
+
+传入 `start_date` 必须是 `YYYY-MM-DD`，且不得早于今日 ET；未传入时以今日
+ET 为起点。起点起连续四天的交易日、开盘和收盘信息先从 `trade_date` 读取，
+缺少所需记录时从 IBAPI 查询并 upsert。必要交易时间为空表示不能交易；传入的
+日期不是交易日时直接报错。盘前/未来日期等待的 timer 只负责在
+`session_start_et` 触发请求，并非 Bar consumer 的等待。
+传入当天日期但已盘后时直接报错；未传入日期而当天已盘后时选择下一个交易日。
+
+### 请求、buffer 与分类
+
+```text
+endDateTime = ""
+durationStr = ceil(now_et - session_start_et) + 10 seconds
+barSize = "1 min"
+whatToShow = "TRADES"
+useRTH = 1
+formatDate = 2
+keepUpToDate = True
+```
+
+不使用独立实时订阅。`hist_buffer` 不再负责按开盘时间筛选；请求 duration 与
+`useRTH=1` 仅过滤非 RTH 数据，并不把结果限制在目标交易日。当 `durationStr` 大于当日
+可用的 RTH 数据量时，IBAPI 会跳过非 RTH 时间并继续向前返回上一交易日的盘中 RTH Bar；
+因此固定余量保持为 `+10 seconds`。收到的 timestamp 仍须校验属于目标 session。IBKR 可能在
+初始 historical callback 的第一根附带上一 session 最后一根 RTH Bar；完成结构校验后，
+该第一根仅作为 callback boundary 忽略。其余 session 外 timestamp 均为错误。内部只把
+complete Bar 放入 `live_buffer`。新 timestamp 到达时，上一根视为 complete。
+收到 historical end 后，合并两个 buffer 的 complete Bar；volume 更大者胜出，
+volume 相同但字段不同则保留 live 并记录两根。批次内固定一个 `now_et`，当前分钟
+减一为 `LIVE`，更早为 `HIST`。后续 complete Bar 立即处理。最后一根
+`session_end_et - 1 minute` 在收盘时成为 `END`；`END` 替代 HIST/LIVE，且不交易。
+
+### 输出、结束与失败
+
+每根 complete Bar 先 upsert 至现有字段的 `raw_1m_bar`，成功后才进入 output
+buffer。`raw_1m_bar` 不存 HIST/LIVE/END。output 有 Bar 时发出 `AVAILABLE`；
+END Bar 也先以 AVAILABLE 被取出，下一次才是 `END`。未收盘且 output 为空时发出
+`WAITING`，consumer 调用 `wait_for_change()`。
+
+收盘后最后 Bar 缺失最多等待 60 秒，之后抛错退出。已输出 timestamp 的重复 Bar
+或晚于输出顺序的旧 Bar 也直接抛错。所有预期外错误直接终止；无论成功或失败，
+fetch 模组均在 `finally` 取消请求。

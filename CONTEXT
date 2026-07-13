@@ -34,5 +34,18 @@ Implemented scope:
 
 Excluded scope:
 
-- Live subscriptions and Phase 4 buffering.
 - Orders, recovery, checkpointing, performance ranking, and scan-level summary.
+
+Phase 4 Live Paper bar fetch is implemented. The dedicated Live CLI resolves
+four ET trading-session dates from the local `trade_date` cache or IBAPI,
+waits for the selected session start, and starts one `reqHistoricalData`
+request with `durationStr = elapsed session seconds + 10 seconds` and
+`keepUpToDate=True`. It emits ordered completed Bar events and
+upserts each emitted raw Bar to `raw_1m_bar`; it does not run strategy logic or
+place orders. `useRTH=1` filters non-RTH data, but an overlong duration skips
+non-RTH time and continues with prior-trading-date intraday RTH Bars; the fixed
+`+10 seconds` margin limits that lookback. IBAPI callback-thread writes use the shared SQLite connection;
+the feed condition lock serializes them with output consumption. IBKR may prepend the previous RTH session's final Bar as the
+first initial historical callback. That structurally valid pre-session Bar is
+ignored as a callback boundary only in that first position. Every other Bar
+outside the resolved session raises and terminates the fetch.

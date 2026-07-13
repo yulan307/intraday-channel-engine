@@ -715,7 +715,10 @@ The implemented Backtest flow scans selected parameter sets over an inclusive
 date range. One generated `run_id` spans every date for one parameter set;
 daily records use `(run_id, trade_date)`. Auto Threshold is application state:
 it is null during warm-up, initializes from the Nth Bar price, and updates for
-the Bar after a triggered BUY or SELL. `docs/phase3_expand.md` is authoritative
+the Bar after a triggered BUY or SELL. A signal-driven update resets Trend and
+Channel state for that following Bar, while the signal Bar retains its existing
+calculation. `processed_1m_bar.decision` persists null for no action and only
+`BUY` or `SELL` for triggered signals. `docs/phase3_expand.md` is authoritative
 for the current request contract and persistence rules.
 
 ## 10. BarFeed 接口
@@ -882,6 +885,9 @@ BacktestFeed 不输出长期 `BAR_WAITING`。
 ---
 
 ## 12. LivePaperFeed
+
+> 本节早期 LivePaperFeed 设计已由文末的
+> `Phase 4 Current-State Override (2026-07-14)` 覆盖；实施以该 override 为准。
 
 文件：
 
@@ -2348,7 +2354,7 @@ Live Bar 不写 raw_1m_bar
 6. 第一次有效 last_* 前 pred_high/pred_low 均为空。
 7. 趋势切换 Bar 使用旧 last_* 的 prediction。
 8. Backtest 数据缺失时重新获取并 upsert raw_1m_bar。
-9. Live Paper 数据不写 raw_1m_bar。
+9. Phase 4 Live Paper completed Bar 在输出前 upsert 至 raw_1m_bar；该表不保存 HIST/LIVE/END 状态。
 10. 正常结束生成 COMPLETED Summary。
 11. 任一模块异常生成 FAILED Summary 并退出。
 12. 不实现中断恢复。
@@ -2377,9 +2383,104 @@ Codex 不得自行增加：
 自动恢复
 checkpoint
 多日批处理
-Live Bar 写入 raw_1m_bar
+未按 Phase 4 当前态规则写入 raw_1m_bar
 算法参数自动更新
 active_threshold 日内更新
 ```
 
 如代码实现需要改变本文件定义的业务行为，应先停止实现并提出明确冲突。
+
+---
+
+## Phase 4 Current-State Override (2026-07-14)
+
+This section supersedes earlier Phase 4 design text in this document.
+
+### Live CLI and startup
+
+The dedicated Live CLI accepts one symbol, one BUY/SELL direction, one required
+numeric fixed threshold, `parameter_set_path`, `parameter_set_id`, and an
+optional ISO `start_date`. `Clock.now_et()` supplies all ET time. A start date
+before today is invalid; an omitted date starts from today. The CLI resolves four
+calendar dates from `trade_date`, obtains missing required rows from IBAPI, and
+upserts them. Empty required session data is not tradable. A supplied non-trading
+date is invalid.
+
+The CLI owns a startup timer. Before the selected `session_start_et`, that timer
+waits and then starts the fetch request. It is separate from output waiting.
+A supplied current-date start after the session is an error; an omitted start
+date after today's session selects the next trading date.
+
+### Live request and callback state
+
+```python
+class LivePaperFeed:
+    def start(self) -> None: ...
+    def next_event(self) -> FeedEvent: ...
+    def wait_for_change(self, timeout: float | None = None) -> None: ...
+    def close(self) -> None: ...
+```
+
+`start()` sends exactly one `reqHistoricalData` request with empty end time,
+seconds from session start plus 10 seconds, `1 min`, `TRADES`, `useRTH=1`,
+`formatDate=2`, and `keepUpToDate=True`. There is no separate live-subscription
+adapter in Phase 4.
+
+`useRTH=1` filters non-RTH data; it does not constrain data to the target date.
+If `durationStr` exceeds the target date's available RTH data, IBAPI skips
+non-RTH time and continues the lookback into prior-trading-date intraday RTH
+Bars. The fixed `+10 seconds` margin deliberately limits that lookback.
+
+The feed owns `hist_buffer`, a completed-only `live_buffer`, an output buffer,
+the latest in-progress timestamp, and the last emitted timestamp. The internal
+partial-update maintenance is private. A new timestamp completes the previous
+bar. `historicalData` fills `hist_buffer`; once the historical end marker arrives,
+merge it with completed live bars, de-duplicate, sort, and process the batch.
+IBKR may prepend the prior RTH session's final bar as the first initial
+historical callback. After structural OHLCV validation, that one pre-session
+bar is ignored as a callback boundary. Any other bar outside the resolved
+session raises an error.
+
+### CompletedBar and output contract
+
+```python
+class BarSource(str, Enum):
+    HIST = "HIST"
+    LIVE = "LIVE"
+    END = "END"
+
+@dataclass(frozen=True)
+class CompletedBar:
+    raw: RawBar
+    source: BarSource
+```
+
+For one batch, capture one fixed `now_et`. The bar for the preceding minute is
+`LIVE`; earlier bars are `HIST`. Subsequent completed bars are processed
+immediately. At `session_end_et`, the bar for `session_end_et - 1 minute` is
+complete and becomes `END`, replacing its other source. An END bar is not
+trade-eligible.
+
+Before output, validate RTH/timestamp/OHLCV and upsert the raw bar using the
+existing Phase 3 `raw_1m_bar` fields. Upsert failure raises and prevents output.
+IBAPI callbacks perform this write from the event-loop thread; the SQLite
+connection permits that use and the feed condition lock serializes callback
+persistence with output consumption.
+The output buffer emits `BAR_AVAILABLE` with a bar. The final END bar is emitted
+as available; after extraction, the next event is `BAR_END`. An empty buffer in
+an open session emits `BAR_WAITING`; the consumer then calls `wait_for_change()`.
+
+For duplicate buffered timestamps, keep greater volume. With equal volume and
+different fields, keep live and log both bars. A duplicate after emission or a
+late timestamp earlier than an emitted timestamp raises. If the last expected
+bar is absent after `session_end_et + 60 seconds`, raise. Any unexpected fetch
+error raises directly; it is not delivered as a process-bar event. `close()` and
+all error/final paths cancel the request in `finally`.
+
+### Phase boundary and verification
+
+Phase 4 does not invoke `process 1m bar`, strategy engines, processed-bar
+persistence, summaries, or orders. Its verification consumer extracts output
+bars and logs them; the feed has already written `raw_1m_bar` before exposure.
+Unit tests use a fake clock and fake
+callbacks; connected TWS tests use real time and verify raw rows and logs.

@@ -23,10 +23,18 @@ class SubscriptionHandle(Protocol):
     def close(self) -> None: ...
 
 
+@dataclass(frozen=True)
+class LiveBarCallbacks:
+    historical: Callable[[RawBar], None]
+    historical_end: Callable[[], None]
+    update: Callable[[RawBar], None]
+
+
 class IbGateway(Protocol):
     def query_trading_session(self, symbol: str, trade_date: date) -> TradingSession: ...
     def request_historical_1m_bars(self, symbol: str, start_et: datetime, end_et: datetime) -> list[RawBar]: ...
     def subscribe_completed_1m_bars(self, symbol: str, callback: Callable[[RawBar], None]) -> SubscriptionHandle: ...
+    def start_live_1m_bars(self, symbol: str, duration_seconds: int, callbacks: LiveBarCallbacks) -> SubscriptionHandle: ...
 
 
 @dataclass
@@ -36,6 +44,16 @@ class _PendingRequest:
     schedule: Sequence[object] | None = None
     error: Exception | None = None
     symbol: str = ""
+
+
+class _LiveSubscription:
+    def __init__(self, gateway: "IbApiGateway", request_id: int) -> None:
+        self.gateway, self.request_id, self.closed = gateway, request_id, False
+
+    def close(self) -> None:
+        if not self.closed:
+            self.closed = True
+            self.gateway._close_live_request(self.request_id)
 
 
 class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
@@ -48,6 +66,7 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
         self._lock = threading.Lock()
         self._next_request_id = 1
         self._pending: dict[int, _PendingRequest] = {}
+        self._live_callbacks: dict[int, tuple[str, LiveBarCallbacks]] = {}
         self._connection_error: Exception | None = None
 
     def connect_gateway(self) -> None:
@@ -103,6 +122,15 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
 
     def historicalData(self, reqId: int, bar: object) -> None:  # noqa: N802
         with self._lock:
+            live = self._live_callbacks.get(reqId)
+        if live is not None:
+            symbol, callbacks = live
+            try:
+                callbacks.historical(self._raw_bar(symbol, bar))
+            except Exception as exc:
+                self._fail_live(reqId, exc)
+            return
+        with self._lock:
             pending = self._pending.get(reqId)
         if pending is not None:
             try:
@@ -119,7 +147,26 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
             pending.event.set()
 
     def historicalDataEnd(self, reqId: int, start: str, end: str) -> None:  # noqa: N802
+        with self._lock:
+            live = self._live_callbacks.get(reqId)
+        if live is not None:
+            try:
+                live[1].historical_end()
+            except Exception as exc:
+                self._fail_live(reqId, exc)
+            return
         self._complete(reqId)
+
+    def historicalDataUpdate(self, reqId: int, bar: object) -> None:  # noqa: N802
+        with self._lock:
+            live = self._live_callbacks.get(reqId)
+        if live is None:
+            return
+        symbol, callbacks = live
+        try:
+            callbacks.update(self._raw_bar(symbol, bar))
+        except Exception as exc:
+            self._fail_live(reqId, exc)
 
     def historicalSchedule(self, reqId: int, startDateTime: str, endDateTime: str, timeZone: str, sessions: Sequence[object]) -> None:  # noqa: N802
         with self._lock:
@@ -151,6 +198,27 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
 
     def subscribe_completed_1m_bars(self, symbol: str, callback: Callable[[RawBar], None]) -> SubscriptionHandle:
         raise NotImplementedError("Live subscriptions begin in Phase 4")
+
+    def start_live_1m_bars(self, symbol: str, duration_seconds: int, callbacks: LiveBarCallbacks) -> SubscriptionHandle:
+        if duration_seconds <= 0:
+            raise IbApiError("Live historical duration must be positive")
+        request_id, _ = self._new_request()
+        with self._lock:
+            self._pending.pop(request_id, None)
+            self._live_callbacks[request_id] = (symbol, callbacks)
+        self.reqHistoricalData(request_id, self._stock(symbol), "", f"{duration_seconds} S", "1 min", "TRADES", 1, 2, True, [])
+        return _LiveSubscription(self, request_id)
+
+    def _close_live_request(self, request_id: int) -> None:
+        self.cancelHistoricalData(request_id)
+        with self._lock:
+            self._live_callbacks.pop(request_id, None)
+
+    def _fail_live(self, request_id: int, error: Exception) -> None:
+        with self._lock:
+            item = self._live_callbacks.pop(request_id, None)
+        if item is not None:
+            self.cancelHistoricalData(request_id)
 
     def _new_request(self) -> tuple[int, _PendingRequest]:
         if not self.is_connected():

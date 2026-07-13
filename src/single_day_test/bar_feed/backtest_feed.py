@@ -16,4 +16,5 @@ class BacktestFeed:
     def next_event(self) -> FeedEvent:
         if self._index >= len(self._bars): return FeedEvent(FeedStatus.BAR_END,None)
         result=self._bars[self._index]; self._index+=1; return FeedEvent(FeedStatus.BAR_AVAILABLE,result)
+    def wait_for_change(self, timeout: float | None = None) -> None: return
     def close(self) -> None: pass

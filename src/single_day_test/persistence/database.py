@@ -20,7 +20,10 @@ class Database:
     """SQLite storage with a deliberately non-compatible Phase 3 schema."""
     def __init__(self, path: str | Path, *, rebuild_legacy: bool = False) -> None:
         self.path = str(path)
-        self.connection = sqlite3.connect(self.path)
+        # IBAPI invokes live historical callbacks on its event-loop thread.
+        # LivePaperFeed serializes its callback persistence with its condition
+        # lock, so the connection must permit that owning callback thread.
+        self.connection = sqlite3.connect(self.path, check_same_thread=False)
         self.connection.row_factory = sqlite3.Row
         self.rebuild_legacy = rebuild_legacy
 

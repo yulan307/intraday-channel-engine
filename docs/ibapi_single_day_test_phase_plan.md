@@ -494,7 +494,10 @@ selects every row with `is_active = 1`, while an explicit ID selects one row.
 The request uses `trade_date_start` / `trade_date_end` and one `threshold`.
 Numeric values are Fixed; omitted or null is Auto. Auto Threshold resets each
 date, initializes from the Nth Bar where N equals `trend_window`, and updates
-after triggered BUY or SELL for the following Bar.
+after triggered BUY or SELL for the following Bar. That signal-driven update
+resets Trend and Channel state for the following Bar, but not for the signal
+Bar itself. The persisted `processed_1m_bar.decision` is null without a
+triggered signal and is `BUY` or `SELL` when one triggers.
 
 Each parameter set receives one generated `run_id` across all selected dates.
 `single_day_run` and daily `run_summary` use `(run_id, trade_date)` keys.
@@ -682,6 +685,9 @@ Backtest 本地数据无效
 
 # Phase 4：Live Paper 行情接入
 
+> 本章下方早期 Phase 4 描述已由本文件末尾的
+> `Phase 4 Current-State Override (2026-07-14)` 覆盖；实施以该 override 为准。
+
 ## 7.1 目标
 
 通过 TWS 接入：
@@ -831,6 +837,69 @@ BAR_END
 一次网络短断测试
 一次收盘结束测试
 ```
+
+---
+
+## Phase 4 Current-State Override (2026-07-14)
+
+This section supersedes earlier Phase 4 text in this document.
+
+Phase 4 is a dedicated Live CLI and Bar-fetch loop. Its inputs are one `symbol`,
+one `BUY`/`SELL` direction, a required numeric fixed threshold,
+`parameter_set_path`, `parameter_set_id`, and an optional `start_date` in
+`YYYY-MM-DD`. Live does not allow an Auto threshold. It does not invoke
+`process 1m bar`, strategy engines, processed-bar persistence, summaries, or
+orders; those remain Phase 5 or later.
+
+All date/time decisions use ET. A supplied start date earlier than today is an
+error; an omitted date starts at today. Resolve four calendar dates, including
+the start date, from `trade_date` first. Missing required dates are queried from
+IBAPI and upserted. Empty required session data means the date is not tradable.
+A supplied non-trading start date is an error. A separate timer waits until the
+selected `session_start_et`; it then starts one request:
+
+A supplied current-date start after that session has ended is an error. When
+the start date is omitted and today's session has ended, select the next trading
+day instead.
+
+```text
+reqHistoricalData(
+  endDateTime="", durationStr=ceil(now_et - session_start_et) + 10 seconds,
+  barSize="1 min", whatToShow="TRADES", useRTH=1, formatDate=2,
+  keepUpToDate=True)
+```
+
+No independent real-time subscription is used. `useRTH=1` filters non-RTH data;
+it does not constrain the result to the target date. If `durationStr` is larger
+than the target date's available RTH data, IBAPI skips non-RTH time and continues
+the lookback into prior-trading-date intraday RTH Bars. The `+10 seconds` margin
+deliberately constrains that behavior. Session timestamp validation applies.
+IBKR may prepend one pre-session final-RTH Bar as
+the first initial historical callback; after structural validation, it is
+ignored as a callback boundary. Any other session-external Bar is an error.
+Historical callbacks fill `hist_buffer`; internal update handling puts completed
+bars only in `live_buffer`. A normal bar completes when a new timestamp arrives.
+On the historical end marker, merge both buffers, de-duplicate by timestamp,
+sort, and process as one batch. Keep the greater-volume duplicate; for equal
+volume with different fields, keep live and log both. A fixed batch `now_et`
+marks the prior-minute bar `LIVE` and older bars `HIST`. Later completed bars are
+processed immediately. The final bar (`session_end_et - 1 minute`) becomes
+complete at session end and has source `END`, which replaces `HIST`/`LIVE` and is
+not trade-eligible.
+
+Before a completed bar is exposed, upsert it to `raw_1m_bar` using the existing
+Phase 3 raw fields. Failure prevents output and raises. The raw table verifies
+raw fields, timestamps, and output order only; it does not store `HIST/LIVE/END`.
+The output buffer emits `AVAILABLE` with a bar, including the final `END` bar.
+After that final bar is extracted, the next event is `END`. An open session with
+an empty output buffer emits `WAITING`; its consumer calls `wait_for_change()`.
+If the final expected bar is absent after `session_end_et + 60 seconds`, raise.
+Late or repeated complete timestamps after output also raise. The fetch module
+cancels the request in `finally` for both completion and failure.
+
+All unexpected errors terminate without retry, recovery, reconnect, checkpoint,
+or fallback. Phase 4 acceptance requires deterministic fake-clock/fake-callback
+tests plus one real-time TWS intraday run that verifies `raw_1m_bar` and logs.
 
 ---
 
