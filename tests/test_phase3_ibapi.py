@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import sqlite3
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -96,7 +97,7 @@ def test_nonconforming_schema_is_cleared_once(tmp_path) -> None:
     path = tmp_path / "legacy.sqlite3"
     sqlite3.connect(path).execute("CREATE TABLE raw_1m_bar (timestamp TEXT)").connection.commit()
     database = Database(path); database.initialize()
-    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "phase3_expand_v1"
+    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "phase3_expand_v2"
 
 
 def test_previous_phase3_schema_is_cleared_once_and_recreated(tmp_path) -> None:
@@ -110,7 +111,7 @@ def test_previous_phase3_schema_is_cleared_once_and_recreated(tmp_path) -> None:
     database.connection.commit()
     database.initialize()
     assert database.connection.execute("SELECT COUNT(*) FROM raw_1m_bar").fetchone()[0] == 0
-    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "phase3_expand_v1"
+    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "phase3_expand_v2"
     columns = {row[1] for row in database.connection.execute("PRAGMA table_info(processed_1m_bar)")}
     assert {"date", "timestamp", "wap", "bar_count", "bar_size", "what_to_show", "use_rth", "source", "trend_slope", "channel_pred_high", "decision_triggered"} <= columns
     assert not any(column.lower().endswith("_et") or column.lower() == "et" for column in columns)
@@ -135,6 +136,11 @@ def test_processed_run_csv_uses_the_processed_table_fields(tmp_path) -> None:
     )
     with database.transaction():
         repositories.insert(record)
+        repositories.insert(replace(
+            record,
+            timestamp_et=timestamp + timedelta(minutes=1),
+            decision=DecisionResult(DecisionLabel.NO_BUY, 0, False),
+        ))
     path = repositories.export_processed_run_csv("run-1", tmp_path / "data")
     with path.open(newline="", encoding="utf-8") as stream:
         rows = list(csv.DictReader(stream))
@@ -143,3 +149,13 @@ def test_processed_run_csv_uses_the_processed_table_fields(tmp_path) -> None:
     assert list(rows[0]) == columns
     assert rows[0]["run_id"] == "run-1"
     assert rows[0]["timestamp"] == "2025-01-15T10:00:00-05:00"
+    assert [row["decision"] for row in rows] == ["BUY", ""]
+    stored = database.connection.execute(
+        "SELECT decision FROM processed_1m_bar WHERE run_id='run-1' ORDER BY date"
+    ).fetchall()
+    assert [row["decision"] for row in stored] == ["BUY", None]
+    decision_column = next(
+        row for row in database.connection.execute("PRAGMA table_info(processed_1m_bar)")
+        if row[1] == "decision"
+    )
+    assert decision_column[3] == 0

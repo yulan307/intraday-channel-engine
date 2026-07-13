@@ -12,9 +12,9 @@ from single_day_test.application.bar_processor import process_bar
 from single_day_test.bar_feed.base import FeedEvent
 from single_day_test.domain.enums import BarSource, DecisionLabel, Direction, FeedStatus, RunMode, RunStatus, ThresholdMode
 from single_day_test.domain.errors import InputValidationError, NonTradingDayError
-from single_day_test.domain.models import CompletedBar, RawBar, RunContext
+from single_day_test.domain.models import ChannelBar, ChannelResult, CompletedBar, RawBar, RunContext, TrendBar, TrendResult
 from single_day_test.domain.parameters import ParameterSet
-from single_day_test.domain.states import RuntimeState
+from single_day_test.domain.states import ChannelState, RuntimeState, TrendState
 from single_day_test.engine.channel_engine import ChannelEngine
 from single_day_test.engine.decision_engine import DecisionEngine
 from single_day_test.engine.trend_engine import TrendEngine
@@ -47,6 +47,79 @@ def test_auto_threshold_warmup_then_uses_nth_bar_price() -> None:
         state = transition.next_state_after_persist
     assert [record.active_threshold for record in records] == [None, None, 102.0]
     assert [record.decision.decision for record in records[:2]] == [DecisionLabel.NO_BUY, DecisionLabel.NO_BUY]
+
+
+class _SignalTrendEngine:
+    def __init__(self, price: float) -> None:
+        self.price = price
+
+    def update(self, bar: CompletedBar, state: TrendState, params: ParameterSet) -> tuple[TrendResult, TrendState]:
+        next_state = TrendState.empty(params)
+        next_state.bars.append(TrendBar(bar.raw.timestamp_et, self.price))
+        return TrendResult(self.price, None, None, None, None, None, None, 1), next_state
+
+
+class _SignalChannelEngine:
+    def __init__(self, pred_high: float | None, pred_low: float | None) -> None:
+        self.pred_high = pred_high
+        self.pred_low = pred_low
+
+    def update(self, bar: CompletedBar, trend: TrendResult, state: ChannelState, params: ParameterSet) -> tuple[ChannelResult, ChannelState]:
+        next_state = ChannelState(bars=[ChannelBar(bar.raw.timestamp_et, trend.price, bar.raw.high, bar.raw.low)])
+        return ChannelResult(self.pred_high, self.pred_low, None, None, None, None, None, None, None, None, None, None, 1), next_state
+
+
+@pytest.mark.parametrize(
+    ("direction", "previous_threshold", "price", "pred_high", "pred_low", "expected_decision"),
+    [
+        (Direction.BUY, 110.0, 105.0, 100.0, None, DecisionLabel.BUY),
+        (Direction.SELL, 100.0, 105.0, None, 110.0, DecisionLabel.SELL),
+    ],
+)
+def test_auto_signal_updates_threshold_and_resets_trend_and_channel_for_next_bar(
+    direction: Direction,
+    previous_threshold: float,
+    price: float,
+    pred_high: float | None,
+    pred_low: float | None,
+    expected_decision: DecisionLabel,
+) -> None:
+    params = _params()
+    context = RunContext("run-1", "AAPL", date(2025, 1, 2), params, direction, ThresholdMode.AUTO, None, RunMode.BACKTEST, None, datetime(2025, 1, 2, 9, 0, tzinfo=ET))
+    state = RuntimeState.empty(params, previous_threshold)
+    transition = process_bar(
+        context,
+        _bar(3, price),
+        state,
+        _SignalTrendEngine(price),
+        _SignalChannelEngine(pred_high, pred_low),
+        DecisionEngine(),
+    )
+
+    assert transition.record.active_threshold == previous_threshold
+    assert transition.record.decision.decision is expected_decision
+    assert transition.next_state_after_persist.active_threshold == price
+    assert not transition.next_state_after_persist.trend.bars
+    assert not transition.next_state_after_persist.trend.valid_slopes
+    assert transition.next_state_after_persist.channel == ChannelState.empty()
+
+
+def test_fixed_signal_preserves_trend_and_channel_state() -> None:
+    params = _params()
+    context = RunContext("run-1", "AAPL", date(2025, 1, 2), params, Direction.BUY, ThresholdMode.FIXED, 110.0, RunMode.BACKTEST, None, datetime(2025, 1, 2, 9, 0, tzinfo=ET))
+    transition = process_bar(
+        context,
+        _bar(3, 105.0),
+        RuntimeState.empty(params, 110.0),
+        _SignalTrendEngine(105.0),
+        _SignalChannelEngine(100.0, None),
+        DecisionEngine(),
+    )
+
+    assert transition.record.decision.decision is DecisionLabel.BUY
+    assert transition.next_state_after_persist.active_threshold == 110.0
+    assert len(transition.next_state_after_persist.trend.bars) == 1
+    assert len(transition.next_state_after_persist.channel.bars) == 1
 
 
 def test_parse_scan_request_enforces_dates_threshold_and_generated_run_id() -> None:

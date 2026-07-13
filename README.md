@@ -9,8 +9,9 @@ strategy processing.
 removed `initial_threshold` column. It keeps all RawBar, request-provenance,
 parameter, Trend, Channel, and Decision fields as queryable columns.
 `active_threshold` is nullable and records the threshold actually used by the
-current Bar; Auto Threshold warm-up rows use `NULL`. No JSON payload columns
-or persisted `_et` columns are used.
+current Bar; Auto Threshold warm-up rows use `NULL`. The persisted `decision`
+is `NULL` when no signal triggers and is `BUY` or `SELL` only for triggered
+signals. No JSON payload columns or persisted `_et` columns are used.
 
 The backtest CLI scans selected parameter sets over one or more inclusive
 calendar dates. Each selected parameter set gets one generated run ID:
@@ -35,9 +36,11 @@ an explicit ID selects exactly that row regardless of activity.
 
 Auto Threshold resets each date, remains null until the Nth Bar where
 `N = trend_window`, initializes from that Bar's strategy price, and updates
-after a triggered BUY or SELL for the next Bar. Fixed Threshold never changes.
+after a triggered BUY or SELL for the next Bar. That signal also resets the
+Trend and Channel state for the next Bar; the signal Bar itself retains the
+pre-reset calculation. Fixed Threshold never changes or resets either state.
 
-The database schema is `phase3_expand_v1`. During initialization, any
+The database schema is `phase3_expand_v2`. During initialization, any
 nonconforming Phase 3 table shape causes the complete Phase 3 database to be
 cleared and recreated; no old data is migrated or retained.
 
