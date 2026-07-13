@@ -909,6 +909,11 @@ tests plus one real-time TWS intraday run that verifies `raw_1m_bar` and logs.
 
 把 Phase 4 的 LivePaperFeed 接入完整算法和持久化流程。
 
+启动配置以 `configs/live_config.yaml` 为默认值。CLI 可显式提供
+`--symbol`、`--direction`、`--threshold`、`--parameter-set-path`、
+`--parameter-set-id`、`--ib-environment` 或 `--trade-date`，并只覆盖对应的
+YAML 字段。YAML `trade_date` 为 null 时，选择当日或当日收盘后的下一可交易日。
+
 流程：
 
 ```text

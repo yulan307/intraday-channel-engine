@@ -67,3 +67,9 @@ write `raw_1m_bar` before Phase 5 processes the corresponding completed Bar.
 The Phase 5 automated suite uses fake clocks and feeds. A real-TWS full-day
 test is deferred to the user. Orders, recovery, checkpointing, performance
 ranking, and scan-level summary remain excluded.
+
+Live startup configuration is YAML-first. `configs/live_config.yaml` supplies
+`symbol`, `direction`, Fixed `threshold`, parameter CSV path and ID,
+`ib_environment`, and optional ET `trade_date`. An explicitly supplied CLI
+option overrides the matching YAML value. A null `trade_date` retains the
+existing current-or-next-tradable-session selection.

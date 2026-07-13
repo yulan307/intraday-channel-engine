@@ -37,6 +37,12 @@ which defaults to `data/logs`. Each run writes
 signals, completion, and failure. Phase 5 uses one injected `Clock`; production
 passes `SystemClock` and tests pass a fake clock.
 
+`configs/live_config.yaml` is the default Live launch configuration. It holds
+the symbol, direction, fixed threshold, parameter selection, IB environment,
+and optional `trade_date`. All matching CLI options are optional and override
+only the corresponding YAML value when explicitly supplied. `trade_date` is
+the YAML/CLI name for the prior Live start-date selection.
+
 ## 2. Phase 4 Contract to Preserve
 
 Phase 4 is complete at the `CompletedBar` event boundary. Its current
