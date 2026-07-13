@@ -43,6 +43,18 @@ and optional `trade_date`. All matching CLI options are optional and override
 only the corresponding YAML value when explicitly supplied. `trade_date` is
 the YAML/CLI name for the prior Live start-date selection.
 
+Input validation is handled at the CLI boundary as a normal exit: one concise
+`ERROR:` console line, one `input_validation_error` JSONL event, exit code 2,
+and no traceback. Before a run ID exists the event is written to
+`<log_dir>/startup.jsonl`; after the run logger exists it uses that run's JSONL
+file. Session resolution emits the requested date, current ET time, selected
+date, and one of `explicit_trade_date`, `current_session`, or
+`next_tradable_session`. Pre-market waiting emits matched console and
+`session_waiting` JSONL status immediately and then on the one-hour,
+fifteen-minute, one-minute, or one-second reporting cadence determined by the
+remaining duration. This does not change `LivePaperFeed` session-end/final-Bar
+waiting.
+
 ## 2. Phase 4 Contract to Preserve
 
 Phase 4 is complete at the `CompletedBar` event boundary. Its current

@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 
@@ -21,7 +21,7 @@ from ..domain.states import RuntimeState
 from ..ib.config import IbConfig
 from ..ib.gateway import IbApiGateway
 from ..persistence.database import Database, SqliteRepositories
-from ..support.clock import SystemClock
+from ..support.clock import Clock, SystemClock
 from ..support.ids import DefaultIdGenerator
 from ..support.logging import JsonLineLogger
 from .single_day_runner import SingleDayRunner
@@ -44,6 +44,31 @@ class LiveLaunchConfig:
     parameter_set_id: str
     ib_environment: str
     trade_date: date | None
+
+
+@dataclass(frozen=True)
+class LiveSessionResolution:
+    session: TradingSession
+    requested_trade_date: date | None
+    now_et: datetime
+    selection_reason: str
+
+
+@dataclass
+class LiveCliReporter:
+    logger: JsonLineLogger
+
+    def use_logger(self, logger: JsonLineLogger) -> None:
+        self.logger = logger
+
+    def info(self, event: str, message: str, **fields: object) -> None:
+        print(message)
+        self.logger.info(event, **fields)
+
+    def input_validation_error(self, error: InputValidationError) -> None:
+        message = str(error)
+        print(f"ERROR: {message}")
+        self.logger.error("input_validation_error", error_type=type(error).__name__, error_message=message)
 
 
 def _args() -> argparse.Namespace:
@@ -119,7 +144,7 @@ def resolve_live_launch_config(args: argparse.Namespace) -> LiveLaunchConfig:
 
 
 def resolve_live_session(repositories: SqliteRepositories, gateway: IbApiGateway, symbol: str,
-                         trade_date: date | None, now_et: datetime) -> TradingSession:
+                         trade_date: date | None, now_et: datetime) -> LiveSessionResolution:
     today = now_et.date()
     if trade_date is not None and trade_date < today:
         raise InputValidationError("trade_date must not be earlier than today's ET date")
@@ -140,24 +165,71 @@ def resolve_live_session(repositories: SqliteRepositories, gateway: IbApiGateway
             raise NonTradingDayError(f"{trade_date.isoformat()} has no tradable session")
         if trade_date == today and now_et >= session.session_end_et:
             raise InputValidationError("trade_date is today's completed session")
-        return session
+        return LiveSessionResolution(session, trade_date, now_et, "explicit_trade_date")
     for session in resolved:
         if not session.is_trading_day or session.session_start_et is None or session.session_end_et is None:
             continue
         if session.trade_date == today and now_et >= session.session_end_et:
             continue
-        return session
+        reason = "current_session" if session.trade_date == today else "next_tradable_session"
+        return LiveSessionResolution(session, trade_date, now_et, reason)
     raise NonTradingDayError("No tradable session found in the next four calendar dates")
 
 
-def main() -> None:
-    args = _args()
+def wait_report_interval(remaining_seconds: float) -> float:
+    if remaining_seconds > 60 * 60:
+        return 60 * 60
+    if remaining_seconds > 10 * 60:
+        return 15 * 60
+    if remaining_seconds > 10:
+        return 60
+    return 1
+
+
+def format_duration(seconds: float) -> str:
+    total_seconds = max(0, int(math.ceil(seconds)))
+    hours, remainder = divmod(total_seconds, 60 * 60)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def wait_for_session_start(
+    clock: Clock,
+    session_start_et: datetime,
+    reporter: LiveCliReporter,
+    sleep: Callable[[float], None],
+) -> None:
+    while True:
+        now_et = clock.now_et()
+        remaining_seconds = (session_start_et - now_et).total_seconds()
+        if remaining_seconds <= 0:
+            return
+        reporting_interval = wait_report_interval(remaining_seconds)
+        sleep_seconds = min(reporting_interval, remaining_seconds)
+        reporter.info(
+            "session_waiting",
+            "WAIT: session_start="
+            f"{session_start_et.isoformat()} remaining={format_duration(remaining_seconds)} "
+            f"next_status_in={format_duration(sleep_seconds)}",
+            now_et=now_et.isoformat(),
+            session_start_et=session_start_et.isoformat(),
+            remaining_seconds=remaining_seconds,
+            next_status_seconds=sleep_seconds,
+        )
+        sleep(sleep_seconds)
+
+
+def execute_live(
+    args: argparse.Namespace,
+    clock: Clock,
+    reporter: LiveCliReporter,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
     config = resolve_live_launch_config(args)
     parameter_sets = load_parameter_sets(config.parameter_set_path, config.parameter_set_id)
     if len(parameter_sets) != 1:
         raise InputValidationError("Live Paper requires exactly one parameter set")
     parameter_set = parameter_sets[0]
-    clock = SystemClock()
     args.database.parent.mkdir(parents=True, exist_ok=True)
     database = Database(args.database)
     database.initialize()
@@ -172,7 +244,8 @@ def main() -> None:
     try:
         gateway.connect_gateway()
         now = clock.now_et()
-        session = resolve_live_session(repositories, gateway, config.symbol, config.trade_date, now)
+        resolution = resolve_live_session(repositories, gateway, config.symbol, config.trade_date, now)
+        session = resolution.session
         started_at_et = clock.now_et().replace(microsecond=0)
         run_id = DefaultIdGenerator().new_run_id(
             started_at_et.astimezone(), config.symbol, parameter_set.parameter_set_id
@@ -184,13 +257,27 @@ def main() -> None:
         )
         state = RuntimeState.empty(parameter_set, config.threshold)
         logger = JsonLineLogger(args.log_dir / f"{run_id}.jsonl", clock)
+        reporter.use_logger(logger)
         repositories.create(context)
         run_created = True
-        logger.info("run_created", run_id=run_id, symbol=context.symbol, trade_date=context.trade_date.isoformat(), parameter_set_id=parameter_set.parameter_set_id)
+        reporter.info("run_created", f"RUN: created run_id={run_id}", run_id=run_id, symbol=context.symbol, trade_date=context.trade_date.isoformat(), parameter_set_id=parameter_set.parameter_set_id)
+        reporter.info(
+            "session_resolved",
+            "DATE: requested="
+            f"{resolution.requested_trade_date.isoformat() if resolution.requested_trade_date else 'null'} "
+            f"selected={session.trade_date.isoformat()} reason={resolution.selection_reason} "
+            f"session_start={session.session_start_et.isoformat() if session.session_start_et else 'null'} "
+            f"session_end={session.session_end_et.isoformat() if session.session_end_et else 'null'}",
+            run_id=run_id,
+            now_et=resolution.now_et.isoformat(),
+            requested_trade_date=resolution.requested_trade_date.isoformat() if resolution.requested_trade_date else None,
+            selected_trade_date=session.trade_date.isoformat(),
+            selection_reason=resolution.selection_reason,
+            session_start_et=session.session_start_et.isoformat() if session.session_start_et else None,
+            session_end_et=session.session_end_et.isoformat() if session.session_end_et else None,
+        )
         assert session.session_start_et is not None
-        delay = (session.session_start_et - clock.now_et()).total_seconds()
-        if delay > 0:
-            time.sleep(delay)
+        wait_for_session_start(clock, session.session_start_et, reporter, sleep)
         feed = LivePaperFeed(config.symbol, session, gateway, repositories, clock)
         runner_started = True
         summary = SingleDayRunner(database, repositories, clock, logger).execute_run(
@@ -218,6 +305,17 @@ def main() -> None:
             feed.close()
         gateway.disconnect_gateway()
         database.close()
+
+
+def main() -> None:
+    args = _args()
+    clock = SystemClock()
+    reporter = LiveCliReporter(JsonLineLogger(args.log_dir / "startup.jsonl", clock))
+    try:
+        execute_live(args, clock, reporter)
+    except InputValidationError as exc:
+        reporter.input_validation_error(exc)
+        raise SystemExit(2) from None
 
 
 if __name__ == "__main__":

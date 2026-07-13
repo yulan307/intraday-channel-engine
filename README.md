@@ -37,6 +37,15 @@ maps to `--trade-date`; null selects today or the next tradable session after
 today's close. `ib_environment` selects the existing paper/live connection
 profile in `configs/ib.yaml`.
 
+An `InputValidationError` is an expected CLI exit: the console prints one
+`ERROR: ...` line, the error is appended to `<log_dir>/startup.jsonl` before a
+run ID exists (or to the run JSONL log afterward), and the process exits with
+code `2` without a traceback. After session resolution, the CLI prints and
+logs the requested and selected date plus its selection reason. Before the
+session begins, it prints and logs `session_waiting` immediately and then at
+one-hour, fifteen-minute, one-minute, or one-second intervals as the remaining
+time crosses the one-hour, ten-minute, and ten-second boundaries.
+
 `processed_1m_bar` preserves the Phase 3 v5 column shape except for the
 removed `initial_threshold` column. It keeps all RawBar, request-provenance,
 parameter, Trend, Channel, and Decision fields as queryable columns.
