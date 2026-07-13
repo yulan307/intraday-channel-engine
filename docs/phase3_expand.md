@@ -74,31 +74,34 @@ executor for one daily run and does not contain the nested scan loops.
 
 ## 5. Scan Input Contract
 
-Scan request JSON files belong under `configs/`. Existing request JSON files
-under `data/` are configuration inputs and should be moved to `configs/` when
-the implementation is updated. Runtime and persisted data remains under
-`data/`.
+Backtest configuration belongs in `configs/backtest.yaml`. The sole entry point
+is `python -m single_day_test.application.backtest_cli`; `--config` selects a
+different YAML file and every explicitly supplied CLI option overrides only
+its matching YAML field. On Windows, `./run_backtest.ps1` invokes that CLI from
+the project root and forwards `--help` and all overrides unchanged. Runtime and
+persisted data remains under `data/`.
 
 Each request must contain exactly one `symbol` value. Symbol lists or multiple
 symbols in one request are not supported.
 
-The request keeps a `parameter_set` object. Its `path` selects the central
-parameter CSV, and its optional `parameter_set_id` controls parameter-set
-selection.
+The YAML uses `parameter_set_path` to select the central parameter CSV and an
+optional `parameter_set_id` to control parameter-set selection. It also owns
+`symbol`, `direction`, `threshold`, `trade_date_start`, `trade_date_end`,
+`ib_environment`, `database`, and `ib_config`.
 
 Example:
 
-```json
-{
-  "symbol": "AAPL",
-  "trade_date_start": "2026-01-02",
-  "trade_date_end": "2026-01-05",
-  "threshold": null,
-  "parameter_set": {
-    "path": "configs/parameter_set.csv",
-    "parameter_set_id": ""
-  }
-}
+```yaml
+symbol: AAPL
+direction: BUY
+trade_date_start: 2026-01-02
+trade_date_end: 2026-01-05
+threshold: null
+parameter_set_path: configs/parameter_set.csv
+parameter_set_id: ""
+ib_environment: paper
+database: data/intraday_channel.sqlite3
+ib_config: configs/ib.yaml
 ```
 
 ### 5.1 Parameter-set Selection
@@ -128,7 +131,7 @@ row is not selected by the active-set scan.
 
 ### 5.2 Date Selection
 
-The request uses `trade_date_start` and `trade_date_end`.
+The YAML uses `trade_date_start` and `trade_date_end`.
 
 ```text
 only trade_date_start is provided
@@ -141,7 +144,7 @@ both are provided
     -> multi-day scan from trade_date_start through trade_date_end
 ```
 
-The date range is inclusive. The request must fail and exit before execution
+The date range is inclusive. Configuration validation must fail and exit before execution
 when:
 
 - neither date is provided;
@@ -186,7 +189,7 @@ The format is:
 ```
 
 The timestamp uses the local machine timezone and has one-second precision.
-A request JSON must not contain or override `run_id`. When multiple active
+Configuration cannot contain or override `run_id`. When multiple active
 parameter sets are selected, the CLI generates one distinct `run_id` per
 selected parameter set.
 
@@ -382,7 +385,7 @@ scope.
 - Auto mode updates its threshold only after a triggered BUY or SELL and
   applies the new value from the following Bar.
 - No state is shared between parameter sets or trade dates.
-- The request must contain exactly one `symbol`.
+- The YAML must contain exactly one `symbol`.
 - At least one of `trade_date_start` and `trade_date_end` must be provided.
 - If only one date is provided, that date is used as the single-day target.
 - If both dates are provided, the range is inclusive.
@@ -411,7 +414,7 @@ scope.
 | --- | --- | --- |
 | E3-001 | Rename the expansion document from `phase3_refactor` to `phase3_expand`. | Accepted |
 | E3-002 | Add an outer parameter-set scan and an inner multi-date backtest. | Accepted |
-| E3-003 | The CLI generates one `run_id` per parameter-set run; request JSON cannot override it. | Accepted |
+| E3-003 | The CLI generates one `run_id` per parameter-set run; YAML configuration cannot override it. | Accepted |
 | E3-004 | `run_id` identifies one parameter set across multiple dates. | Accepted |
 | E3-005 | A provided threshold selects Fixed mode. | Accepted |
 | E3-006 | Fixed threshold never changes after BUY or SELL. | Accepted |
@@ -422,7 +425,7 @@ scope.
 | E3-011 | Trend, Channel, Decision, BarFeed, and common data-processing behavior remain unchanged. | Accepted |
 | E3-012 | Parameter CSV rows use `is_active`; value `1` selects rows for the default scan. | Accepted |
 | E3-013 | A provided `parameter_set_id` selects only that row and overrides `is_active`. | Accepted |
-| E3-014 | Scan request JSON files belong under `configs/`, while runtime data remains under `data/`. | Accepted |
+| E3-014 | The YAML backtest configuration belongs under `configs/`, while runtime data remains under `data/`. | Accepted |
 | E3-015 | Each scan request contains exactly one required `symbol`. | Accepted |
 | E3-016 | Date fields are `trade_date_start` and `trade_date_end`; one field means single-day and both mean inclusive multi-day scan. | Accepted |
 | E3-017 | Invalid date order or an end date later than the current ET date causes validation failure and process exit. | Accepted |

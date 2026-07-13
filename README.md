@@ -37,6 +37,11 @@ maps to `--trade-date`; null selects today or the next tradable session after
 today's close. `ib_environment` selects the existing paper/live connection
 profile in `configs/ib.yaml`.
 
+On Windows, `run_live.ps1` and `run_backtest.ps1` start the respective CLI from
+the project `.venv` and project root. They forward all arguments unchanged, so
+`./run_live.ps1 --help`, `./run_backtest.ps1 --help`, and YAML overrides such
+as `./run_backtest.ps1 --parameter-set-id another-set` are supported.
+
 An `InputValidationError` is an expected CLI exit: the console prints one
 `ERROR: ...` line, the error is appended to `<log_dir>/startup.jsonl` before a
 run ID exists (or to the run JSONL log afterward), and the process exits with
@@ -68,12 +73,15 @@ recorded as `SKIPPED`; failed dates are recorded as `FAILED` and later dates
 continue. One multi-day CSV is exported at `data/<run_id>.csv` after all dates
 have been attempted; partial rows written before a failed date remain included.
 
-Request JSON files belong in `configs/`. A request requires `symbol` and
-`direction`, accepts one or both of `trade_date_start` / `trade_date_end`, and
-contains one `threshold`. A numeric threshold selects Fixed mode; omitted or
-`null` selects Auto mode. Requests cannot provide `run_id`. The parameter CSV
-has `is_active`: an empty `parameter_set_id` selects all rows with `1`, while
-an explicit ID selects exactly that row regardless of activity.
+Backtest startup defaults are stored in `configs/backtest.yaml`. Run
+`python -m single_day_test.application.backtest_cli` to use it, or pass
+`--config` for another YAML file. Every supplied CLI option overrides only its
+matching YAML field. The YAML supplies the symbol, direction, threshold,
+parameter CSV selection, inclusive trade-date range, IB profile, database, and
+IB config path. One date field selects one date; both select the inclusive
+range. A non-empty `parameter_set_id` plus one selected date runs one daily
+backtest. An empty ID scans every `is_active = 1` parameter row; an explicit ID
+selects exactly that row regardless of activity.
 
 Auto Threshold resets each date, remains null until the Nth Bar where
 `N = trend_window`, initializes from that Bar's strategy price, and updates
