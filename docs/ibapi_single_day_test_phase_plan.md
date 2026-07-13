@@ -947,7 +947,7 @@ Core Engine 与 Persistence 不直接访问 TWS。
 5. 每根 Bar 成功保存后才提交下一状态。
 6. Signal 触发后允许后续再次触发。
 7. processed_1m_bar 中 HIST/LIVE 标记正确。
-8. Live 运行期间不写 raw_1m_bar。
+8. Phase 4 在 Live Bar 输出前写入 raw_1m_bar；Phase 5 不重复拥有该写入。
 9. 收盘后生成 COMPLETED Summary。
 10. TWS 或算法异常生成 FAILED Summary。
 11. feed.close() 必须执行。

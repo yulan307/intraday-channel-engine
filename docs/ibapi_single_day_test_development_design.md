@@ -2484,3 +2484,20 @@ persistence, summaries, or orders. Its verification consumer extracts output
 bars and logs them; the feed has already written `raw_1m_bar` before exposure.
 Unit tests use a fake clock and fake
 callbacks; connected TWS tests use real time and verify raw rows and logs.
+
+## Phase 5 Current-State Override (2026-07-14)
+
+Phase 5 consumes the Phase 4 `CompletedBar` interface without adding a TWS API
+path. The Live CLI loads one selected parameter set, creates a `LIVE_PAPER`
+run before any pre-market wait, and passes `LivePaperFeed` to
+`SingleDayRunner`. `live_phase` is null. `HIST`, `LIVE`, and `END` Bars use the
+same strategy pipeline and may persist signals; Phase 4 continues to write
+`raw_1m_bar` before the Runner receives each Bar.
+
+The Runner uses an injected Clock, waits through `feed.wait_for_change()` on
+empty output, and commits one processed Bar plus any signal before advancing
+runtime state. `LivePaperFeed` computes the unbounded wait deadline from the
+session end and final-bar timeout. Completed and failed terminal records write
+the run status and summary atomically. Live runs write structured JSONL audit
+events to `data/logs/<run_id>.jsonl` by default. There is no order, retry,
+recovery, checkpoint, or automated real-TWS test in this Phase.

@@ -140,7 +140,7 @@ class LivePaperFeed:
             self._in_progress = None
         if self._last_emitted == expected or any(bar.raw.timestamp_et == expected for bar in self._output):
             return
-        if now > end + timedelta(seconds=60):
+        if now >= end + timedelta(seconds=60):
             raise HistoricalDataError("Timed out waiting for final expected RTH bar")
 
     def next_event(self) -> FeedEvent:
@@ -161,7 +161,16 @@ class LivePaperFeed:
 
     def wait_for_change(self, timeout: float | None = None) -> None:
         with self._condition:
-            self._condition.wait(timeout)
+            self._condition.wait(self._wait_timeout(timeout))
+
+    def _wait_timeout(self, timeout: float | None) -> float | None:
+        if timeout is not None:
+            return timeout
+        end = self.session.session_end_et
+        assert end is not None
+        now = self.clock.now_et()
+        deadline = end if now < end else end + timedelta(seconds=60)
+        return max(0.0, (deadline - now).total_seconds())
 
     def close(self) -> None:
         with self._condition:

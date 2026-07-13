@@ -1,4 +1,4 @@
-# Current Context — Phase 3 Expand
+# Current Context — Phase 5 Live Paper Closed Loop
 
 Phase 3 Expand is implemented for historical IBAPI backtests. It retains the
 existing BarFeed, Trend, Channel, and Decision engine behavior while adding an
@@ -49,3 +49,21 @@ the feed condition lock serializes them with output consumption. IBKR may prepen
 first initial historical callback. That structurally valid pre-session Bar is
 ignored as a callback boundary only in that first position. Every other Bar
 outside the resolved session raises and terminates the fetch.
+
+Phase 5 is implemented. The same Live CLI now loads exactly one parameter set,
+creates a `LIVE_PAPER` `RunContext` and `single_day_run` before any pre-market
+wait, then passes `LivePaperFeed` to `SingleDayRunner`. `live_phase` remains
+null. The runner uses one injected Clock, processes `HIST`, `LIVE`, and `END`
+with the existing strategy engines, and advances `RuntimeState` only after the
+processed Bar and optional Signal commit together.
+
+`LivePaperFeed` owns deadline-aware waiting: on an empty output buffer the
+runner waits for callbacks/errors/close or the next session-end/final-bar
+deadline. Terminal `run_summary` and `single_day_run` status are written in one
+transaction for both `COMPLETED` and `FAILED` runs. Each Live run writes a
+JSONL audit log at `data/logs/<run_id>.jsonl` by default. Phase 4 continues to
+write `raw_1m_bar` before Phase 5 processes the corresponding completed Bar.
+
+The Phase 5 automated suite uses fake clocks and feeds. A real-TWS full-day
+test is deferred to the user. Orders, recovery, checkpointing, performance
+ranking, and scan-level summary remain excluded.
