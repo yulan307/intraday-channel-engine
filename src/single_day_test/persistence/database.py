@@ -13,7 +13,7 @@ from ..domain.enums import RunStatus
 from ..domain.errors import PersistenceError
 from ..domain.models import ProcessedBarRecord, RawBar, RunContext, RunSummary, SignalEvent, TradingSession
 
-SCHEMA_VERSION = "phase3_expand_v1"
+SCHEMA_VERSION = "phase3_expand_v2"
 
 
 class Database:
@@ -85,7 +85,7 @@ class Database:
           channel_last_low_percentile REAL, channel_curr_trend_slope REAL,
           channel_curr_trend_intercept REAL, channel_curr_high_percentile REAL,
           channel_curr_low_percentile REAL, channel_stack_length_after INTEGER NOT NULL,
-          decision TEXT NOT NULL, decision_recorded_break_count INTEGER NOT NULL,
+          decision TEXT, decision_recorded_break_count INTEGER NOT NULL,
           decision_triggered INTEGER NOT NULL,
           PRIMARY KEY(run_id, date));
         CREATE TABLE signal_event (
@@ -235,7 +235,8 @@ class SqliteRepositories:
             channel.last_trend_slope, channel.last_trend_intercept, channel.last_trend_bar_count,
             channel.last_high_percentile, channel.last_low_percentile, channel.curr_trend_slope,
             channel.curr_trend_intercept, channel.curr_high_percentile, channel.curr_low_percentile,
-            channel.channel_stack_length_after, decision.decision.value,
+            channel.channel_stack_length_after,
+            decision.decision.value if decision.triggered else None,
             decision.recorded_break_count, int(decision.triggered),
         ))
 

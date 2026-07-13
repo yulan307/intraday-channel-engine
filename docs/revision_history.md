@@ -1,5 +1,7 @@
 # Revision History
 
+| 2026-07-13 | `application/bar_processor.py`, `persistence/database.py`, `tests/test_phase3_expand.py`, and `tests/test_phase3_ibapi.py` | Auto Threshold signal updates now reset Trend and Channel state for the following Bar while preserving the signal Bar calculation. `processed_1m_bar.decision` now persists `NULL` for no action and only `BUY` or `SELL` for triggered signals; the schema was advanced to `phase3_expand_v2`. | Updated `docs/phase3_expand.md`, `README.md`, `CONTEXT`, and this revision history. |
+
 | Date       | Changed files / modules | Summary | Related documentation updates |
 |------------|--------------------------|---------|-------------------------------|
 | 2026-07-12 | Phase 0 `src/` package, `.gitignore`, and tests | Added the project/package layout and git ignore rules; implemented Phase 0 domain enums, errors, parameters, models, states, and pure Protocol interfaces. Added ET-aware datetime normalization with naive-datetime rejection, `FeedEvent` validation, and unit coverage. No database, IBAPI/TWS, algorithm, or order implementation was added. | Updated the phase plan, flow, and development design documents, plus `CONTEXT`, to record the Phase 0 contracts. |

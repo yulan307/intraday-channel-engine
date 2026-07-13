@@ -265,6 +265,7 @@ Nth Bar
 BUY or SELL signal on Bar k
     -> Bar k uses the previous threshold
     -> Bar k + 1 uses the signal price
+    -> Bar k + 1 starts with empty TrendState and ChannelState
 
 next trade date
     -> threshold resets to None
@@ -303,6 +304,11 @@ The signal Bar is evaluated using the threshold that existed before that Bar.
 The updated threshold takes effect only on the next Bar. This avoids evaluating
 the same Bar twice with two different thresholds.
 
+After a triggered Auto Threshold update, the next Bar also starts with empty
+Trend and Channel state. The engines remain shared, stateless algorithms; the
+application replaces only their input states. Fixed Threshold and the initial
+Nth-Bar Auto Threshold resolution do not reset either state.
+
 ## 9. Threshold State Ownership
 
 The current `RunContext.active_threshold` is a fixed run-level value. Auto
@@ -329,6 +335,11 @@ Daily runtime state
 `DecisionEngine` continues to receive one resolved `active_threshold` for the
 current Bar. A threshold policy or application-level state transition resolves
 the threshold before evaluation and updates it after a triggered BUY or SELL.
+
+`DecisionEngine` may return internal no-signal labels for state handling, but
+`processed_1m_bar.decision` persists `NULL` unless a signal triggers. Triggered
+rows persist only `BUY` or `SELL`; `decision_recorded_break_count` and
+`decision_triggered` remain available for audit.
 
 ## 10. Daily Results and Multi-Day CSV
 

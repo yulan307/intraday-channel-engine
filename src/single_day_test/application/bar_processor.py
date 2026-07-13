@@ -1,11 +1,12 @@
 from __future__ import annotations
 from dataclasses import dataclass, asdict
 from ..domain.models import CompletedBar, DecisionResult, ProcessedBarRecord, RunContext, SignalEvent
-from ..domain.states import DecisionState, RuntimeState
+from ..domain.states import ChannelState, DecisionState, RuntimeState, TrendState
 from ..engine.trend_engine import TrendEngine
 from ..engine.channel_engine import ChannelEngine
 from ..engine.decision_engine import DecisionEngine
 from .threshold_policy import next_threshold, no_threshold_decision, resolve_threshold
+from ..domain.enums import ThresholdMode
 
 @dataclass(frozen=True)
 class BarProcessTransition:
@@ -30,4 +31,10 @@ def process_bar(context: RunContext, bar: CompletedBar, state: RuntimeState, tre
         decision, next_decision = decision_transition.result, decision_transition.next_state_after_persist
     record=ProcessedBarRecord(context.run_id,context.symbol,context.trade_date,bar.raw.timestamp_et,context.mode,bar.source,context.direction,context.parameter_set.parameter_set_id,asdict(context.parameter_set),active_threshold,bar.raw.open,bar.raw.high,bar.raw.low,bar.raw.close,bar.raw.volume,bar.raw.wap,bar.raw.barCount,trend,channel,decision)
     event=SignalEvent(context.run_id,bar.raw.timestamp_et,decision.decision,trend.price,decision.recorded_break_count) if decision.triggered else None
-    return BarProcessTransition(record,RuntimeState(next_trend,next_channel,next_decision,next_threshold(context.threshold_mode,active_threshold,trend.price,decision),True,state.processed_bar_count+1,[*state.signal_events,*([event] if event else [])]),event)
+    next_active_threshold = next_threshold(
+        context.threshold_mode, active_threshold, trend.price, decision
+    )
+    if context.threshold_mode is ThresholdMode.AUTO and decision.triggered:
+        next_trend = TrendState.empty(context.parameter_set)
+        next_channel = ChannelState.empty()
+    return BarProcessTransition(record,RuntimeState(next_trend,next_channel,next_decision,next_active_threshold,True,state.processed_bar_count+1,[*state.signal_events,*([event] if event else [])]),event)
