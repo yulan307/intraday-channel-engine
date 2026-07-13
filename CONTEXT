@@ -73,3 +73,12 @@ Live startup configuration is YAML-first. `configs/live_config.yaml` supplies
 `ib_environment`, and optional ET `trade_date`. An explicitly supplied CLI
 option overrides the matching YAML value. A null `trade_date` retains the
 existing current-or-next-tradable-session selection.
+
+Live CLI input validation is an expected error exit: it prints one `ERROR:`
+line, logs `input_validation_error` to `startup.jsonl` before a run ID exists
+(or the run JSONL log afterward), and exits with code 2 without a traceback.
+After session resolution it logs and prints requested/selected dates and the
+selection reason. Pre-market startup waiting emits matched `session_waiting`
+console/JSONL status immediately and at one-hour, fifteen-minute, one-minute,
+or one-second intervals based on remaining time. Feed session-end and
+final-Bar waiting are unchanged.

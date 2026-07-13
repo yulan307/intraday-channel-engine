@@ -914,6 +914,13 @@ tests plus one real-time TWS intraday run that verifies `raw_1m_bar` and logs.
 `--parameter-set-id`、`--ib-environment` 或 `--trade-date`，并只覆盖对应的
 YAML 字段。YAML `trade_date` 为 null 时，选择当日或当日收盘后的下一可交易日。
 
+Live CLI 的输入校验错误以正常退出处理：控制台仅输出一行 `ERROR:`，并写入
+`input_validation_error` JSONL 事件；run ID 尚未生成时写入
+`<log_dir>/startup.jsonl`，生成后写入该 run 的日志，进程以退出码 2 结束且不输出
+traceback。会话解析后会输出并记录请求日期、当前 ET 时间、选中日期和选择原因；
+开盘前等待会立即输出一次状态，并按剩余时间在 1 小时、15 分钟、1 分钟或 1 秒的
+频率输出 `session_waiting`。这不改变 Feed 原有的 session-end/final-Bar 等待。
+
 流程：
 
 ```text

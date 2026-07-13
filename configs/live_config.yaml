@@ -22,4 +22,4 @@ ib_environment: paper
 
 # Optional ET trading date in YYYY-MM-DD format.
 # null selects today, or the next tradable session after today's close.
-trade_date: 2026-07-12
+trade_date: null
