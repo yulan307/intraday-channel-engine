@@ -246,6 +246,21 @@ class SqliteRepositories:
     def save_summary(self, summary: RunSummary) -> None:
         with self.database.transaction(): self.database.connection.execute('INSERT INTO run_summary VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (summary.run_id,summary.trade_date.isoformat(),summary.status.value,summary.processed_bar_count,summary.signal_count,summary.final_curr_slope,summary.final_curr_intercept,summary.final_high_percentile,summary.final_low_percentile,summary.final_channel_length,_epoch(summary.started_at_et),_epoch(summary.ended_at_et),summary.error_type,summary.error_message))
 
+    def complete_with_summary(self, summary: RunSummary) -> None:
+        self._save_terminal_summary(summary, RunStatus.COMPLETED)
+
+    def fail_with_summary(self, summary: RunSummary) -> None:
+        self._save_terminal_summary(summary, RunStatus.FAILED)
+
+    def _save_terminal_summary(self, summary: RunSummary, status: RunStatus) -> None:
+        if summary.status is not status:
+            raise PersistenceError(f"Terminal summary status must be {status.value}")
+        with self.database.transaction():
+            self.database.connection.execute('INSERT INTO run_summary VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (summary.run_id,summary.trade_date.isoformat(),summary.status.value,summary.processed_bar_count,summary.signal_count,summary.final_curr_slope,summary.final_curr_intercept,summary.final_high_percentile,summary.final_low_percentile,summary.final_channel_length,_epoch(summary.started_at_et),_epoch(summary.ended_at_et),summary.error_type,summary.error_message))
+            error_type = summary.error_type if status is RunStatus.FAILED else None
+            error_message = summary.error_message if status is RunStatus.FAILED else None
+            self.database.connection.execute('UPDATE single_day_run SET status=?, ended_at_epoch=?, error_type=?, error_message=? WHERE run_id=? AND trade_date=?', (status.value,_epoch(summary.ended_at_et),error_type,error_message,summary.run_id,summary.trade_date.isoformat()))
+
     def export_processed_run_csv(self, run_id: str, output_dir: str | Path = Path("data")) -> Path:
         rows = self.database.connection.execute(
             'SELECT * FROM processed_1m_bar WHERE run_id=? ORDER BY date', (run_id,)

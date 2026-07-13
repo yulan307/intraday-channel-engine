@@ -4,6 +4,7 @@ from typing import Protocol
 from datetime import date, datetime
 
 from ..domain.models import RunContext
+from ..domain.models import RunSummary
 
 
 class RunRepository(Protocol):
@@ -16,4 +17,10 @@ class RunRepository(Protocol):
     def mark_failed(
         self, run_id: str, trade_date: date, ended_at_et: datetime, error_type: str, error_message: str
     ) -> None:
+        ...
+
+    def complete_with_summary(self, summary: RunSummary) -> None:
+        ...
+
+    def fail_with_summary(self, summary: RunSummary) -> None:
         ...

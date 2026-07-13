@@ -12,6 +12,7 @@ from ..domain.models import RunContext, RunSummary
 from ..domain.parameters import ParameterSet
 from ..domain.states import RuntimeState
 from ..persistence.database import Database, SqliteRepositories
+from ..support.clock import SystemClock
 from ..support.ids import IdGenerator
 from .single_day_runner import SingleDayRunner
 from .summary_service import build_failed_summary, build_skipped_summary
@@ -49,7 +50,7 @@ class BacktestScanner:
         self, request: BacktestScanRequest, parameter_sets: Sequence[ParameterSet]
     ) -> list[RunSummary]:
         summaries: list[RunSummary] = []
-        runner = SingleDayRunner(self.database, self.repositories)
+        runner = SingleDayRunner(self.database, self.repositories, SystemClock())
         for params in parameter_sets:
             run_id = self.id_generator.new_run_id(
                 self.started_at_local, request.symbol, params.parameter_set_id

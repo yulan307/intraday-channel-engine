@@ -93,3 +93,15 @@ def test_late_completed_bar_raises(tmp_path) -> None:
     feed = LivePaperFeed("AAPL", session, Gateway(), repos, clock)
     feed._process_batch([bar(1)])
     with pytest.raises(BarOrderingError): feed._process_batch([bar(0)])
+
+
+def test_live_feed_uses_session_deadlines_when_runner_waits_without_timeout(tmp_path) -> None:
+    clock = Clock(datetime(2025, 1, 2, 9, 32, tzinfo=ET))
+    session = TradingSession(date(2025, 1, 2), True, datetime(2025, 1, 2, 9, 30, tzinfo=ET), datetime(2025, 1, 2, 9, 35, tzinfo=ET))
+    database = Database(tmp_path / "deadline.sqlite3"); database.initialize(); repos = SqliteRepositories(database)
+    feed = LivePaperFeed("AAPL", session, Gateway(), repos, clock)
+
+    assert feed._wait_timeout(None) == 180.0
+    clock.value = datetime(2025, 1, 2, 9, 35, tzinfo=ET)
+    assert feed._wait_timeout(None) == 60.0
+    assert feed._wait_timeout(2.5) == 2.5

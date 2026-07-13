@@ -1,11 +1,11 @@
-# Intraday Channel Engine — Phase 3 Expand
+# Intraday Channel Engine — Phase 5 Live Paper Closed Loop
 
 Phase 3 Expand uses IBAPI as the only raw-market-data contract. Historical
 `BarData` is persisted in SQLite with native UTC epoch `date`, OHLC, `volume`,
 `wap`, and `barCount`; ET timestamps are derived for RTH validation and
 strategy processing.
 
-Phase 4 adds a dedicated Live Paper CLI and completed-Bar fetch loop. It uses
+Phase 4 provides the Live Paper completed-Bar feed. It uses
 one `reqHistoricalData(..., durationStr=elapsed session seconds + 10 seconds,
 useRTH=1, keepUpToDate=True)` request, persists
 each emitted raw Bar to `raw_1m_bar`, and stops before strategy execution or
@@ -15,6 +15,20 @@ trading-date intraday RTH Bars. The live request uses only a `+10 seconds`
 margin. IBKR can prepend the previous session's final RTH Bar as the first
 initial historical callback; only that structurally valid pre-session boundary
 Bar is ignored. Other session-external Bars terminate the fetch.
+
+Phase 5 connects that feed to the existing Trend, Channel, and Decision
+pipeline. The Live CLI creates one `LIVE_PAPER` run before any pre-market
+wait, processes `HIST`, `LIVE`, and `END` bars through `SingleDayRunner`, and
+writes `processed_1m_bar`, optional `signal_event`, and one atomic terminal
+`run_summary`/`single_day_run` status. Phase 4 continues to upsert
+`raw_1m_bar` before Phase 5 consumes each completed Bar. Live runs remain
+Fixed Threshold, paper-only, and have no order, retry, recovery, or checkpoint
+behavior.
+
+Each Live run writes `data/logs/<run_id>.jsonl` by default; use `--log-dir` to
+choose another directory. The JSONL file records run creation, committed Bars,
+signals, completion, and failure. The final real-TWS full-day validation is
+performed manually; the automated suite uses fake clocks and feeds.
 
 `processed_1m_bar` preserves the Phase 3 v5 column shape except for the
 removed `initial_threshold` column. It keeps all RawBar, request-provenance,

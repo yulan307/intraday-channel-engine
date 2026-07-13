@@ -1602,3 +1602,19 @@ END Bar 也先以 AVAILABLE 被取出，下一次才是 `END`。未收盘且 out
 收盘后最后 Bar 缺失最多等待 60 秒，之后抛错退出。已输出 timestamp 的重复 Bar
 或晚于输出顺序的旧 Bar 也直接抛错。所有预期外错误直接终止；无论成功或失败，
 fetch 模组均在 `finally` 取消请求。
+
+## Phase 5 Current-State Override (2026-07-14)
+
+Live CLI 在 Session 解析成功后、盘前等待前创建 `single_day_run`，并在等待结束后把
+`LivePaperFeed` 交给 `SingleDayRunner`：
+
+```text
+LivePaperFeed -> CompletedBar -> process_bar -> processed_1m_bar/signal_event
+-> atomic run_summary + single_day_run terminal status
+```
+
+`HIST`、`LIVE`、`END` 都进入同一算法链；Phase 4 仍在输出前写入 `raw_1m_bar`。
+Runner 的 `WAITING` 调用无参 `wait_for_change()`；Feed 负责在新 callback、错误、关闭、
+收盘或收盘后 60 秒最终 Bar deadline 时唤醒。每个 run 默认写入
+`data/logs/<run_id>.jsonl`，记录创建、已提交 Bar、Signal 和终态。无订单、重试、恢复或
+checkpoint；真实 TWS 全天验收由用户最后执行。
