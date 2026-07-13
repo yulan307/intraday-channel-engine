@@ -24,6 +24,7 @@ class LivePhase(str, Enum):
 class BarSource(str, Enum):
     HIST = "HIST"
     LIVE = "LIVE"
+    END = "END"
 
 
 class FeedStatus(str, Enum):

@@ -5,6 +5,17 @@ Phase 3 Expand uses IBAPI as the only raw-market-data contract. Historical
 `wap`, and `barCount`; ET timestamps are derived for RTH validation and
 strategy processing.
 
+Phase 4 adds a dedicated Live Paper CLI and completed-Bar fetch loop. It uses
+one `reqHistoricalData(..., durationStr=elapsed session seconds + 10 seconds,
+useRTH=1, keepUpToDate=True)` request, persists
+each emitted raw Bar to `raw_1m_bar`, and stops before strategy execution or
+orders. `useRTH=1` filters non-RTH data but does not constrain the response to
+the target date: an overlong duration skips non-RTH time and returns prior
+trading-date intraday RTH Bars. The live request uses only a `+10 seconds`
+margin. IBKR can prepend the previous session's final RTH Bar as the first
+initial historical callback; only that structurally valid pre-session boundary
+Bar is ignored. Other session-external Bars terminate the fetch.
+
 `processed_1m_bar` preserves the Phase 3 v5 column shape except for the
 removed `initial_threshold` column. It keeps all RawBar, request-provenance,
 parameter, Trend, Channel, and Decision fields as queryable columns.
@@ -46,5 +57,5 @@ cleared and recreated; no old data is migrated or retained.
 
 Install the official IBKR TWS API Python client before running this project.
 The PyPI `ibapi==9.81.1.post1` package is too old for `SCHEDULE` and must not
-be used. Configure `configs/ib.yaml` with paper/live TWS profiles. Live
-subscriptions, orders, recovery, and checkpointing are outside this scope.
+be used. Configure `configs/ib.yaml` with paper/live TWS profiles. Orders,
+recovery, and checkpointing are outside this scope.
