@@ -100,7 +100,7 @@ def test_live_runner_processes_hist_live_end_and_writes_jsonl(tmp_path: Path) ->
     assert [row[0] for row in database.connection.execute("SELECT bar_source FROM processed_1m_bar ORDER BY date")] == ["HIST", "LIVE", "END"]
     assert database.connection.execute("SELECT status FROM run_summary").fetchone()[0] == "COMPLETED"
     events = [json.loads(line)["event"] for line in (tmp_path / "logs" / "phase5-run.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert events == ["bar_processed", "bar_processed", "bar_processed", "run_completed"]
+    assert events == ["bar_received", "bar_analysis_completed", "bar_persisted", "first_bar_confirmed", "run_completed"]
 
 
 def test_live_runner_failure_keeps_partial_rows_and_writes_failed_terminal_state(tmp_path: Path) -> None:
@@ -121,6 +121,27 @@ def test_live_runner_failure_keeps_partial_rows_and_writes_failed_terminal_state
     assert database.connection.execute("SELECT status FROM single_day_run").fetchone()[0] == "FAILED"
     assert database.connection.execute("SELECT status FROM run_summary").fetchone()[0] == "FAILED"
     assert json.loads((tmp_path / "logs" / "phase5-run.jsonl").read_text(encoding="utf-8").splitlines()[-1])["event"] == "run_failed"
+
+
+def test_error_log_level_keeps_errors_and_summary_after_full_run(tmp_path: Path) -> None:
+    clock = Clock(datetime(2025, 1, 2, 9, 33, tzinfo=ET))
+    database = Database(tmp_path / "error-level.sqlite3")
+    database.initialize()
+    repositories = SqliteRepositories(database)
+    feed = Feed([
+        FeedEvent(FeedStatus.BAR_AVAILABLE, bar(0, BarSource.HIST)),
+        FeedEvent(FeedStatus.BAR_AVAILABLE, bar(1, BarSource.END)),
+        FeedEvent(FeedStatus.BAR_END, None),
+    ])
+    logger = JsonLineLogger(tmp_path / "logs" / "error-level.jsonl", clock, "ERROR")
+
+    summary = SingleDayRunner(database, repositories, clock, logger).execute_run(
+        context(clock), feed, RuntimeState.empty(params(), 100.0),
+    )
+
+    assert summary.processed_bar_count == 2
+    events = [json.loads(line)["event"] for line in (tmp_path / "logs" / "error-level.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert events == ["run_completed"]
 
 
 def test_processed_bar_persistence_failure_stops_before_next_bar(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

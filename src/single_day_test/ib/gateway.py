@@ -14,6 +14,7 @@ from ibapi import server_versions
 
 from ..domain.errors import HistoricalDataError, IbApiError
 from ..domain.models import RawBar, TradingSession
+from ..support.logging import StructuredLogger
 from .config import IbConfig
 
 ET = ZoneInfo("America/New_York")
@@ -28,6 +29,7 @@ class LiveBarCallbacks:
     historical: Callable[[RawBar], None]
     historical_end: Callable[[], None]
     update: Callable[[RawBar], None]
+    error: Callable[[Exception], None]
 
 
 class IbGateway(Protocol):
@@ -58,7 +60,7 @@ class _LiveSubscription:
 
 class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
     """Blocking domain gateway over IBAPI's callback-driven client."""
-    def __init__(self, config: IbConfig) -> None:
+    def __init__(self, config: IbConfig, logger: StructuredLogger | None = None) -> None:
         EClient.__init__(self, self)
         self.config = config
         self._ready = threading.Event()
@@ -68,17 +70,31 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
         self._pending: dict[int, _PendingRequest] = {}
         self._live_callbacks: dict[int, tuple[str, LiveBarCallbacks]] = {}
         self._connection_error: Exception | None = None
+        self._logger = logger
+
+    def set_logger(self, logger: StructuredLogger | None) -> None:
+        self._logger = logger
+
+    def _info(self, event: str, **fields: object) -> None:
+        if self._logger is not None:
+            self._logger.info(event, **fields)
+
+    def _error(self, event: str, **fields: object) -> None:
+        if self._logger is not None:
+            self._logger.error(event, **fields)
 
     def connect_gateway(self) -> None:
         self._ensure_schedule_client_version()
         if self.isConnected():
             return
+        self._info("ibapi_connecting", host=self.config.host, port=self.config.port, client_id=self.config.client_id)
         self.connect(self.config.host, self.config.port, self.config.client_id)
         self._thread = threading.Thread(target=self.run, name="ibapi-event-loop", daemon=True)
         self._thread.start()
         if not self._ready.wait(self.config.connect_timeout):
             self.disconnect()
             raise IbApiError("Timed out waiting for IBAPI nextValidId; verify TWS API connection and client ID")
+        self._info("ibapi_connected", client_id=self.config.client_id)
 
     @staticmethod
     def _ensure_schedule_client_version() -> None:
@@ -104,8 +120,14 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
         with self._lock:
             self._next_request_id = max(self._next_request_id, orderId)
         self._ready.set()
+        self._info("ibapi_next_valid_id", order_id=orderId)
 
     def error(self, reqId: int, errorTime: int, errorCode: int, errorString: str, advancedOrderRejectJson: str = "") -> None:  # noqa: N802
+        self._error(
+            "ibapi_error_callback", request_id=reqId, error_time=errorTime,
+            error_code=errorCode, error_message=errorString,
+            advanced_order_reject_json=advancedOrderRejectJson or None,
+        )
         if errorCode in {2104, 2106, 2158}:
             return
         error = IbApiError(f"IBAPI error {errorCode} for request {reqId}: {errorString}")
@@ -114,11 +136,17 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
         if pending is not None:
             pending.error = error
             pending.event.set()
+            return
+        with self._lock:
+            live = self._live_callbacks.get(reqId)
+        if live is not None:
+            self._fail_live(reqId, error)
         elif errorCode in {1100, 1300, 502}:
             self._connection_error = error
             for item in tuple(self._pending.values()):
                 item.error = error
                 item.event.set()
+            self._fail_all_live(error)
 
     def historicalData(self, reqId: int, bar: object) -> None:  # noqa: N802
         with self._lock:
@@ -126,6 +154,7 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
         if live is not None:
             symbol, callbacks = live
             try:
+                self._info("ibapi_historical_callback", request_id=reqId, symbol=symbol)
                 callbacks.historical(self._raw_bar(symbol, bar))
             except Exception as exc:
                 self._fail_live(reqId, exc)
@@ -134,6 +163,7 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
             pending = self._pending.get(reqId)
         if pending is not None:
             try:
+                self._info("ibapi_historical_callback", request_id=reqId, symbol=pending.symbol)
                 pending.bars.append(self._raw_bar(pending.symbol, bar))
             except HistoricalDataError as exc:
                 pending.error = exc
@@ -145,12 +175,14 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
         for pending in tuple(self._pending.values()):
             pending.error = error
             pending.event.set()
+        self._fail_all_live(error)
 
     def historicalDataEnd(self, reqId: int, start: str, end: str) -> None:  # noqa: N802
         with self._lock:
             live = self._live_callbacks.get(reqId)
         if live is not None:
             try:
+                self._info("ibapi_historical_end", request_id=reqId)
                 live[1].historical_end()
             except Exception as exc:
                 self._fail_live(reqId, exc)
@@ -164,6 +196,7 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
             return
         symbol, callbacks = live
         try:
+            self._info("ibapi_historical_update", request_id=reqId, symbol=symbol)
             callbacks.update(self._raw_bar(symbol, bar))
         except Exception as exc:
             self._fail_live(reqId, exc)
@@ -179,6 +212,7 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
         request_id, pending = self._new_request()
         pending.symbol = symbol
         end = f"{trade_date.isoformat().replace('-', '')} 23:59:59 US/Eastern"
+        self._info("ibapi_schedule_requested", request_id=request_id, symbol=symbol, trade_date=trade_date.isoformat())
         self.reqHistoricalData(request_id, self._stock(symbol), end, "1 D", "1 day", "SCHEDULE", 1, 1, False, [])
         self._await(request_id, pending)
         sessions = list(pending.schedule or [])
@@ -192,6 +226,7 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
         request_id, pending = self._new_request()
         pending.symbol = symbol
         end = end_et.astimezone(ET).strftime("%Y%m%d %H:%M:%S US/Eastern")
+        self._info("ibapi_historical_requested", request_id=request_id, symbol=symbol, start_et=start_et.isoformat(), end_et=end_et.isoformat())
         self.reqHistoricalData(request_id, self._stock(symbol), end, "1 D", "1 min", "TRADES", 1, 2, False, [])
         self._await(request_id, pending)
         return [bar for bar in pending.bars if start_et <= bar.timestamp_et < end_et]
@@ -206,6 +241,7 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
         with self._lock:
             self._pending.pop(request_id, None)
             self._live_callbacks[request_id] = (symbol, callbacks)
+        self._info("ibapi_live_historical_requested", request_id=request_id, symbol=symbol, duration_seconds=duration_seconds)
         self.reqHistoricalData(request_id, self._stock(symbol), "", f"{duration_seconds} S", "1 min", "TRADES", 1, 2, True, [])
         return _LiveSubscription(self, request_id)
 
@@ -219,6 +255,13 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
             item = self._live_callbacks.pop(request_id, None)
         if item is not None:
             self.cancelHistoricalData(request_id)
+            item[1].error(error)
+
+    def _fail_all_live(self, error: Exception) -> None:
+        with self._lock:
+            request_ids = tuple(self._live_callbacks)
+        for request_id in request_ids:
+            self._fail_live(request_id, error)
 
     def _new_request(self) -> tuple[int, _PendingRequest]:
         if not self.is_connected():

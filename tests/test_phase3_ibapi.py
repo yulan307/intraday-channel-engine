@@ -14,7 +14,7 @@ from single_day_test.domain.errors import HistoricalDataError, PersistenceError
 from single_day_test.domain.enums import BarSource, DecisionLabel, Direction, RunMode, TrendLabel
 from single_day_test.domain.models import ChannelResult, DecisionResult, ProcessedBarRecord, RawBar, TradingSession, TrendResult
 from single_day_test.ib.config import IbConfig
-from single_day_test.ib.gateway import IbApiGateway, _PendingRequest
+from single_day_test.ib.gateway import IbApiGateway, LiveBarCallbacks, _PendingRequest
 from single_day_test.ib.services import HistoricalBarService, TradingSessionService
 from single_day_test.persistence.database import Database, SqliteRepositories
 
@@ -63,6 +63,40 @@ def test_callback_error_completes_matching_request() -> None:
     pending = _PendingRequest(); api._pending[9] = pending
     api.error(9, 0, 162, "No market data")
     assert pending.event.is_set() and pending.error is not None
+
+
+class EventLogger:
+    trace_enabled = True
+    def __init__(self) -> None: self.events: list[tuple[str, str, dict[str, object]]] = []
+    def info(self, event: str, **fields: object) -> None: self.events.append(("INFO", event, fields))
+    def error(self, event: str, **fields: object) -> None: self.events.append(("ERROR", event, fields))
+    def summary(self, event: str, **fields: object) -> None: self.events.append(("INFO", event, fields))
+    def stop_info_trace(self) -> None: self.trace_enabled = False
+
+
+def test_callback_error_is_logged_with_full_ibapi_context() -> None:
+    logger = EventLogger()
+    api = IbApiGateway(IbConfig("127.0.0.1", 7497, 71, 0.1), logger)
+
+    api.error(9, 123, 2104, "Market data farm connection is OK", "")
+
+    level, event, fields = logger.events[-1]
+    assert level == "ERROR" and event == "ibapi_error_callback"
+    assert fields == {
+        "request_id": 9, "error_time": 123, "error_code": 2104,
+        "error_message": "Market data farm connection is OK", "advanced_order_reject_json": None,
+    }
+
+
+def test_callback_error_fails_matching_live_subscription() -> None:
+    api = IbApiGateway(IbConfig("127.0.0.1", 7497, 71, 0.1))
+    errors: list[Exception] = []
+    api._live_callbacks[8] = ("AAPL", LiveBarCallbacks(lambda _: None, lambda: None, lambda _: None, errors.append))
+
+    api.error(8, 0, 162, "No market data")
+
+    assert len(errors) == 1
+    assert "IBAPI error 162 for request 8" in str(errors[0])
 
 
 def test_connection_close_fails_all_pending_requests() -> None:

@@ -184,7 +184,7 @@ def test_yaml_backtest_config_applies_defaults_and_cli_overrides(tmp_path: Path)
     path.write_text(
         "symbol: AAPL\ndirection: SELL\nthreshold: 0\nthreshold_update_rate: 12.5\nparameter_set_path: configs/parameter_set.csv\n"
         "parameter_set_id: ''\ntrade_date_start: 2025-01-02\ntrade_date_end: 2025-01-03\n"
-        "ib_environment: paper\ndatabase: data/test.sqlite3\nib_config: configs/ib.yaml\n",
+            "ib_environment: paper\ndatabase: data/test.sqlite3\nib_config: configs/ib.yaml\nlog_level: INFO\n",
         encoding="utf-8",
     )
     configured = resolve_backtest_launch_config(_backtest_args(path), date(2025, 1, 3))
@@ -230,7 +230,7 @@ def test_yaml_backtest_config_rejects_unknown_or_invalid_values(tmp_path: Path) 
         resolve_backtest_launch_config(_backtest_args(path), date(2025, 1, 3))
     path.write_text(
         "symbol: AAPL\ndirection: BUY\nthreshold: ''\nparameter_set_path: params.csv\nparameter_set_id: p1\n"
-        "trade_date_start: 2025-01-03\ntrade_date_end: 2025-01-02\nib_environment: paper\ndatabase: test.sqlite3\nib_config: ib.yaml\n",
+            "trade_date_start: 2025-01-03\ntrade_date_end: 2025-01-02\nib_environment: paper\ndatabase: test.sqlite3\nib_config: ib.yaml\nlog_level: INFO\n",
         encoding="utf-8",
     )
     with pytest.raises(InputValidationError, match="threshold"):

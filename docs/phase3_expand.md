@@ -87,7 +87,10 @@ symbols in one request are not supported.
 The YAML uses `parameter_set_path` to select the central parameter CSV and an
 optional `parameter_set_id` to control parameter-set selection. It also owns
 `symbol`, `direction`, `threshold`, `threshold_update_rate`, `trade_date_start`, `trade_date_end`,
-`ib_environment`, `database`, and `ib_config`.
+`ib_environment`, `database`, `ib_config`, and required `log_level` (`INFO` or
+`ERROR`). INFO diagnostics stop after the first successfully persisted Bar;
+the backtest itself still processes every selected Bar. IBAPI errors and final
+summaries remain logged at either level.
 
 Example:
 

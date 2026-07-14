@@ -33,8 +33,12 @@ writes an atomic terminal summary plus run status.
 
 The CLI accepts a numeric Fixed or null/omitted Auto threshold and adds `--log-dir`,
 which defaults to `data/logs`. Each run writes
-`<log_dir>/<run_id>.jsonl`. The log records run creation, committed bars,
-signals, completion, and failure. Phase 5 uses one injected `Clock`; production
+`<log_dir>/<run_id>.jsonl`. Required YAML `log_level` is `INFO` or `ERROR`.
+INFO records the startup-through-first-persisted-Bar sequence then becomes silent
+for normal processing; errors and final summaries remain. All IBAPI error
+callbacks are recorded with their full callback context, and a matching live
+request error fails the feed. After first-Bar confirmation, Live emits a
+terminal-only heartbeat every five minutes while waiting. Phase 5 uses one injected `Clock`; production
 passes `SystemClock` and tests pass a fake clock.
 
 `configs/live_config.yaml` is the default Live launch configuration. It holds

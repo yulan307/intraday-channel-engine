@@ -24,7 +24,7 @@ def args(config: Path, **overrides: object) -> argparse.Namespace:
 def test_yaml_launch_defaults_and_cli_overrides(tmp_path: Path) -> None:
     path = tmp_path / "live.yaml"
     path.write_text(
-        "symbol: AAPL\ndirection: BUY\nthreshold: 100\nparameter_set_path: configs/parameter_set.csv\nparameter_set_id: p1\nib_environment: paper\ntrade_date: 2026-07-15\n",
+        "symbol: AAPL\ndirection: BUY\nthreshold: 100\nparameter_set_path: configs/parameter_set.csv\nparameter_set_id: p1\nib_environment: paper\ntrade_date: 2026-07-15\nlog_level: INFO\n",
         encoding="utf-8",
     )
 
@@ -55,11 +55,18 @@ def test_live_config_rejects_missing_or_unsupported_values(tmp_path: Path) -> No
     with pytest.raises(InputValidationError, match="unsupported fields"):
         resolve_live_launch_config(args(path))
 
+    path.write_text(
+        "symbol: AAPL\ndirection: BUY\nthreshold: 100\nparameter_set_path: params.csv\nparameter_set_id: p1\nib_environment: paper\nlog_level: DEBUG\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(InputValidationError, match="log_level"):
+        resolve_live_launch_config(args(path))
+
 
 def test_live_config_allows_null_threshold_as_auto_mode(tmp_path: Path) -> None:
     path = tmp_path / "live.yaml"
     path.write_text(
-        "symbol: AAPL\ndirection: BUY\nthreshold: null\nthreshold_update_rate: 12.5\nparameter_set_path: params.csv\nparameter_set_id: p1\nib_environment: paper\ntrade_date: null\n",
+        "symbol: AAPL\ndirection: BUY\nthreshold: null\nthreshold_update_rate: 12.5\nparameter_set_path: params.csv\nparameter_set_id: p1\nib_environment: paper\ntrade_date: null\nlog_level: INFO\n",
         encoding="utf-8",
     )
 
@@ -75,7 +82,7 @@ def test_live_config_allows_null_threshold_as_auto_mode(tmp_path: Path) -> None:
 def test_live_config_allows_null_threshold_update_rate_as_zero(tmp_path: Path) -> None:
     path = tmp_path / "live.yaml"
     path.write_text(
-        "symbol: AAPL\ndirection: BUY\nthreshold: null\nthreshold_update_rate:\nparameter_set_path: params.csv\nparameter_set_id: p1\nib_environment: paper\n",
+        "symbol: AAPL\ndirection: BUY\nthreshold: null\nthreshold_update_rate:\nparameter_set_path: params.csv\nparameter_set_id: p1\nib_environment: paper\nlog_level: INFO\n",
         encoding="utf-8",
     )
 
@@ -87,7 +94,7 @@ def test_live_config_allows_null_threshold_update_rate_as_zero(tmp_path: Path) -
 def test_live_config_uses_numeric_threshold_as_auto_initial_value_when_rate_is_supplied(tmp_path: Path) -> None:
     path = tmp_path / "live.yaml"
     path.write_text(
-        "symbol: AAPL\ndirection: BUY\nthreshold: 100\nthreshold_update_rate: 0\nparameter_set_path: params.csv\nparameter_set_id: p1\nib_environment: paper\n",
+        "symbol: AAPL\ndirection: BUY\nthreshold: 100\nthreshold_update_rate: 0\nparameter_set_path: params.csv\nparameter_set_id: p1\nib_environment: paper\nlog_level: INFO\n",
         encoding="utf-8",
     )
 
@@ -102,7 +109,7 @@ def test_live_config_uses_numeric_threshold_as_auto_initial_value_when_rate_is_s
 def test_live_config_rejects_invalid_threshold_update_rate(tmp_path: Path, rate: object) -> None:
     path = tmp_path / "live.yaml"
     path.write_text(
-        f"symbol: AAPL\ndirection: BUY\nthreshold: null\nthreshold_update_rate: {rate!r}\nparameter_set_path: params.csv\nparameter_set_id: p1\nib_environment: paper\n",
+        f"symbol: AAPL\ndirection: BUY\nthreshold: null\nthreshold_update_rate: {rate!r}\nparameter_set_path: params.csv\nparameter_set_id: p1\nib_environment: paper\nlog_level: INFO\n",
         encoding="utf-8",
     )
 

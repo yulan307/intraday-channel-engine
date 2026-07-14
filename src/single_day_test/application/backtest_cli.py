@@ -26,6 +26,7 @@ from ..ib.services import HistoricalBarService, TradingSessionService
 from ..persistence.database import Database, SqliteRepositories
 from ..support.clock import SystemClock
 from ..support.ids import DefaultIdGenerator, IdGenerator
+from ..support.logging import JsonLineLogger, StructuredLogger, TerminalMirrorLogger
 from .single_day_runner import SingleDayRunner
 from .startup_confirmation import print_and_confirm_launch
 from .summary_service import build_failed_summary, build_skipped_summary
@@ -37,6 +38,7 @@ _ET = ZoneInfo("America/New_York")
 _BACKTEST_CONFIG_FIELDS = {
     "symbol", "direction", "threshold", "parameter_set_path", "parameter_set_id",
     "trade_date_start", "trade_date_end", "ib_environment", "database", "ib_config", "threshold_update_rate",
+    "log_level",
 }
 
 
@@ -58,6 +60,7 @@ class BacktestLaunchConfig:
     ib_environment: str
     database: Path
     ib_config: Path
+    log_level: str
 
 
 class BacktestScanner:
@@ -71,6 +74,8 @@ class BacktestScanner:
         started_at_local: datetime,
         feed_factory: Callable[[str, date], BarFeed],
         output_dir: Path = Path("data"),
+        logger_factory: Callable[[str], StructuredLogger] | None = None,
+        gateway_logger_setter: Callable[[StructuredLogger], None] | None = None,
     ) -> None:
         self.database = database
         self.repositories = repositories
@@ -78,12 +83,13 @@ class BacktestScanner:
         self.started_at_local = started_at_local
         self.feed_factory = feed_factory
         self.output_dir = output_dir
+        self.logger_factory = logger_factory
+        self.gateway_logger_setter = gateway_logger_setter
 
     def execute(
         self, request: BacktestScanRequest, parameter_sets: Sequence[ParameterSet]
     ) -> list[RunSummary]:
         summaries: list[RunSummary] = []
-        runner = SingleDayRunner(self.database, self.repositories, SystemClock())
         for params in parameter_sets:
             run_id = self.id_generator.new_run_id(
                 self.started_at_local, request.symbol, params.parameter_set_id
@@ -95,6 +101,12 @@ class BacktestScanner:
                     None, self.started_at_local, threshold_update_rate=getattr(request, "threshold_update_rate", 0.0),
                 )
                 state = RuntimeState.empty(params, request.fixed_threshold)
+                logger = self.logger_factory(run_id) if self.logger_factory is not None else None
+                if logger is not None:
+                    logger.info("backtest_run_created", run_id=run_id, trade_date=trade_date.isoformat(), parameter_set_id=params.parameter_set_id)
+                    if self.gateway_logger_setter is not None:
+                        self.gateway_logger_setter(logger)
+                runner = SingleDayRunner(self.database, self.repositories, SystemClock(), logger)
                 self.repositories.create(context)
                 try:
                     feed = self.feed_factory(request.symbol, trade_date)
@@ -104,12 +116,16 @@ class BacktestScanner:
                     summary = build_skipped_summary(context, state, ended, str(exc))
                     self.repositories.save_summary(summary)
                     summaries.append(summary)
+                    if logger is not None:
+                        logger.summary("run_skipped", run_id=run_id, trade_date=trade_date.isoformat(), reason=str(exc))
                     continue
                 except Exception as exc:
                     ended = datetime.now().astimezone()
                     self.repositories.mark_failed(context.run_id, context.trade_date, ended, type(exc).__name__, str(exc))
                     summaries.append(build_failed_summary(context, state, exc, ended))
                     self.repositories.save_summary(summaries[-1])
+                    if logger is not None:
+                        logger.error("run_failed", run_id=run_id, error_type=type(exc).__name__, error_message=str(exc))
                     continue
                 try:
                     summaries.append(runner.execute_run(context, feed, state, create_run=False))
@@ -194,6 +210,7 @@ def resolve_backtest_launch_config(args: argparse.Namespace, today_et: date) -> 
     database = selected("database")
     ib_config = selected("ib_config")
     threshold_update_rate_raw = values.get("threshold_update_rate")
+    log_level = values.get("log_level")
     threshold_update_rate = parse_threshold_update_rate(threshold_update_rate_raw)
     if not isinstance(symbol, str) or not symbol.strip():
         raise InputValidationError("symbol is required")
@@ -222,6 +239,8 @@ def resolve_backtest_launch_config(args: argparse.Namespace, today_et: date) -> 
         raise InputValidationError("database is required")
     if not isinstance(ib_config, (str, Path)) or not str(ib_config):
         raise InputValidationError("ib_config is required")
+    if log_level not in {"INFO", "ERROR"}:
+        raise InputValidationError("log_level must be INFO or ERROR")
     request = BacktestScanRequest(
         symbol.strip(), parsed_direction,
         _parse_dates(selected("trade_date_start"), selected("trade_date_end"), today_et),
@@ -229,7 +248,7 @@ def resolve_backtest_launch_config(args: argparse.Namespace, today_et: date) -> 
     )
     return BacktestLaunchConfig(
         request, Path(parameter_set_path), parameter_set_id.strip() if isinstance(parameter_set_id, str) else None,
-        ib_environment, Path(database), Path(ib_config),
+        ib_environment, Path(database), Path(ib_config), log_level,
     )
 
 
@@ -248,6 +267,7 @@ def backtest_launch_configuration(config: BacktestLaunchConfig) -> dict[str, obj
         "ib_environment": config.ib_environment,
         "database": str(config.database),
         "ib_config": str(config.ib_config),
+        "log_level": config.log_level,
     }
 
 
@@ -261,6 +281,14 @@ def main() -> None:
     database.initialize()
     repositories = SqliteRepositories(database)
     gateway: IbApiGateway | None = None
+    startup_logger = TerminalMirrorLogger(JsonLineLogger(Path("data/logs/startup.jsonl"), SystemClock(), config.log_level))
+    active_logger: StructuredLogger = startup_logger
+
+    def set_gateway_logger(logger: StructuredLogger) -> None:
+        nonlocal active_logger
+        active_logger = logger
+        if gateway is not None:
+            gateway.set_logger(logger)
 
     def feed_factory(symbol: str, trade_date: date) -> BacktestFeed:
         nonlocal gateway
@@ -268,7 +296,7 @@ def main() -> None:
         cached = repositories.load_rth_bars(symbol, trade_date) if session is not None else []
         if session is None or not validate_complete_backtest_day(cached, session):
             if gateway is None:
-                gateway = IbApiGateway(IbConfig.from_yaml(config.ib_config, config.ib_environment))
+                gateway = IbApiGateway(IbConfig.from_yaml(config.ib_config, config.ib_environment), active_logger)
                 gateway.connect_gateway()
             session = TradingSessionService(repositories, gateway).resolve(symbol, trade_date)
             HistoricalBarService(repositories, gateway).load_or_fetch(symbol, session)
@@ -277,7 +305,9 @@ def main() -> None:
 
     try:
         summaries = BacktestScanner(
-            database, repositories, DefaultIdGenerator(), datetime.now().astimezone().replace(microsecond=0), feed_factory
+            database, repositories, DefaultIdGenerator(), datetime.now().astimezone().replace(microsecond=0), feed_factory,
+            logger_factory=lambda run_id: TerminalMirrorLogger(JsonLineLogger(Path("data/logs") / f"{run_id}.jsonl", SystemClock(), config.log_level)),
+            gateway_logger_setter=set_gateway_logger,
         ).execute(config.request, parameter_sets)
         print(json.dumps([
             {"run_id": item.run_id, "trade_date": item.trade_date.isoformat(), "status": item.status.value,

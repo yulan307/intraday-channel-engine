@@ -105,3 +105,12 @@ selection reason. Pre-market startup waiting emits matched `session_waiting`
 console/JSONL status immediately and at one-hour, fifteen-minute, one-minute,
 or one-second intervals based on remaining time. Feed session-end and
 final-Bar waiting are unchanged.
+
+Both startup YAML files require `log_level: INFO | ERROR`. INFO records the
+terminal/JSONL startup path through the first successfully persisted Bar,
+including IBAPI requests, callbacks, and Trend/Channel/Decision results. The
+same run continues without normal INFO records after that Bar; errors and the
+terminal summary remain recorded. All IBAPI error callbacks retain request ID,
+code, message, callback time, and optional advanced rejection JSON. A matching
+live request error wakes the feed and fails the run. Live starts a terminal-only
+heartbeat every five minutes after its first confirmed Bar.

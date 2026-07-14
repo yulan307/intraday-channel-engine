@@ -37,7 +37,7 @@ class Repository:
 
 
 class Gateway:
-    def __init__(self, session: TradingSession | None = None) -> None:
+    def __init__(self, session: TradingSession | None = None, logger: object | None = None) -> None:
         self.session = session
         self.connected = False
 
@@ -46,6 +46,9 @@ class Gateway:
 
     def disconnect_gateway(self) -> None:
         self.connected = False
+
+    def set_logger(self, logger: object | None) -> None:
+        pass
 
     def query_trading_session(self, symbol: str, trade_date: date) -> TradingSession:
         assert self.session is not None
@@ -142,7 +145,7 @@ def test_main_converts_invalid_effective_config_to_logged_exit_code_two(tmp_path
 def test_main_converts_invalid_requested_date_to_logged_exit_code_two(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     config = tmp_path / "live.yaml"
     config.write_text(
-        "symbol: AAPL\ndirection: BUY\nthreshold: 100\nparameter_set_path: configs/parameter_set.csv\nparameter_set_id: mu-phase3-v1\nib_environment: paper\ntrade_date: 2000-01-01\n",
+        "symbol: AAPL\ndirection: BUY\nthreshold: 100\nparameter_set_path: configs/parameter_set.csv\nparameter_set_id: mu-phase3-v1\nib_environment: paper\ntrade_date: 2000-01-01\nlog_level: INFO\n",
         encoding="utf-8",
     )
     args = argparse.Namespace(

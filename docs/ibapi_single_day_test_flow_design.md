@@ -1616,5 +1616,5 @@ LivePaperFeed -> CompletedBar -> process_bar -> processed_1m_bar/signal_event
 `HIST`、`LIVE`、`END` 都进入同一算法链；Phase 4 仍在输出前写入 `raw_1m_bar`。
 Runner 的 `WAITING` 调用无参 `wait_for_change()`；Feed 负责在新 callback、错误、关闭、
 收盘或收盘后 60 秒最终 Bar deadline 时唤醒。每个 run 默认写入
-`data/logs/<run_id>.jsonl`，记录创建、已提交 Bar、Signal 和终态。无订单、重试、恢复或
+`data/logs/<run_id>.jsonl`。启动 YAML 的 `log_level` 必须为 `INFO` 或 `ERROR`：INFO 仅记录至首根成功持久化 Bar（含 IBAPI 请求/回调与策略结果），之后正常处理静默；两种等级都保留 IBAPI error 回调和终态。首根 Bar 后 Live 每五分钟仅在终端输出心跳。无订单、重试、恢复或
 checkpoint；真实 TWS 全天验收由用户最后执行。

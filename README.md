@@ -25,10 +25,16 @@ writes `processed_1m_bar`, optional `signal_event`, and one atomic terminal
 Fixed or Auto Threshold, paper-only, and have no order, retry, recovery, or checkpoint
 behavior.
 
-Each Live run writes `data/logs/<run_id>.jsonl` by default; use `--log-dir` to
-choose another directory. The JSONL file records run creation, committed Bars,
-signals, completion, and failure. The final real-TWS full-day validation is
-performed manually; the automated suite uses fake clocks and feeds.
+Each run writes `data/logs/<run_id>.jsonl` by default; Live accepts `--log-dir`
+to choose another directory. `log_level` is required in both startup YAML files
+and is either `INFO` or `ERROR`. `INFO` records and mirrors the startup-to-first-
+confirmed-Bar sequence, including IBAPI requests/callbacks and first-Bar strategy
+results; after that confirmation normal INFO records stop while processing
+continues. Both levels retain IBAPI errors and final summaries. Every IBAPI
+`error(...)` callback records its request ID, code, message, callback time, and
+advanced rejection payload when supplied. Live begins a terminal-only five-minute
+heartbeat after the first confirmed Bar. The final real-TWS full-day validation
+is performed manually; the automated suite uses fake clocks and feeds.
 
 Live startup defaults are stored in the local, ignored `configs/live_config.yaml`.
 Use `configs/live_config_sample.yaml` as the tracked setup template when setting
@@ -85,7 +91,7 @@ setting up a checkout. Run
 `python -m single_day_test.application.backtest_cli` to use it, or pass
 `--config` for another YAML file. Every supplied CLI option overrides only its
 matching YAML field. The YAML supplies the symbol, direction, threshold,
-`threshold_update_rate`,
+`threshold_update_rate`, `log_level`,
 parameter CSV selection, inclusive trade-date range, IB profile, database, and
 IB config path. One date field selects one date; both select the inclusive
 range. A non-empty `parameter_set_id` plus one selected date runs one daily
