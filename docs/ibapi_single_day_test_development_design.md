@@ -716,8 +716,9 @@ date range. One generated `run_id` spans every date for one parameter set;
 daily records use `(run_id, trade_date)`. Auto Threshold is application state:
 it initializes from the first completed Bar raw `open`, and updates for
 the Bar after a triggered BUY or SELL. `threshold_update_rate` is a 0-100
-percentage (null or omitted is zero): BUY subtracts it and SELL adds it to the
-signal price. A signal-driven update resets Trend and
+percentage: a numeric threshold plus a numeric rate enables Auto and uses the
+threshold as initial state; null or omitted rate keeps that threshold Fixed.
+BUY subtracts the rate and SELL adds it to the signal price. A signal-driven update resets Trend and
 Channel state for that following Bar, while the signal Bar retains its existing
 calculation. `processed_1m_bar.decision` persists null for no action and only
 `BUY` or `SELL` for triggered signals. `docs/phase3_expand.md` is authoritative

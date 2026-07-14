@@ -60,3 +60,12 @@ def parse_threshold_update_rate(value: object) -> float:
     if not 0 <= rate <= 100:
         raise InputValidationError("threshold_update_rate must be from 0 to 100")
     return rate
+
+
+def resolve_config_threshold_mode(
+    threshold: float | None,
+    threshold_update_rate_is_supplied: bool,
+) -> ThresholdMode:
+    if threshold is None or threshold_update_rate_is_supplied:
+        return ThresholdMode.AUTO
+    return ThresholdMode.FIXED

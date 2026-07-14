@@ -27,7 +27,7 @@ from ..support.logging import JsonLineLogger
 from .single_day_runner import SingleDayRunner
 from .startup_confirmation import print_and_confirm_launch
 from .summary_service import build_failed_summary
-from .threshold_policy import parse_threshold_update_rate
+from .threshold_policy import parse_threshold_update_rate, resolve_config_threshold_mode
 
 
 DEFAULT_LIVE_CONFIG = Path("configs/live_config.yaml")
@@ -42,6 +42,7 @@ class LiveLaunchConfig:
     symbol: str
     direction: Direction
     threshold: float | None
+    threshold_mode: ThresholdMode
     parameter_set_path: Path
     parameter_set_id: str
     ib_environment: str
@@ -117,7 +118,8 @@ def resolve_live_launch_config(args: argparse.Namespace) -> LiveLaunchConfig:
     parameter_set_id = selected("parameter_set_id")
     ib_environment = selected("ib_environment")
     trade_date = selected("trade_date")
-    threshold_update_rate = parse_threshold_update_rate(values.get("threshold_update_rate"))
+    threshold_update_rate_raw = values.get("threshold_update_rate")
+    threshold_update_rate = parse_threshold_update_rate(threshold_update_rate_raw)
     if not isinstance(symbol, str) or not symbol.strip():
         raise InputValidationError("symbol is required")
     if not isinstance(direction, str):
@@ -147,8 +149,10 @@ def resolve_live_launch_config(args: argparse.Namespace) -> LiveLaunchConfig:
             raise InputValidationError("trade_date must be YYYY-MM-DD or null") from exc
     if trade_date is not None and not isinstance(trade_date, date):
         raise InputValidationError("trade_date must be YYYY-MM-DD or null")
+    fixed_threshold = float(threshold) if threshold is not None else None
     return LiveLaunchConfig(
-        symbol.strip(), parsed_direction, float(threshold) if threshold is not None else None, Path(parameter_set_path),
+        symbol.strip(), parsed_direction, fixed_threshold,
+        resolve_config_threshold_mode(fixed_threshold, threshold_update_rate_raw is not None), Path(parameter_set_path),
         parameter_set_id.strip(), ib_environment, trade_date, threshold_update_rate,
     )
 
@@ -158,7 +162,8 @@ def live_launch_configuration(config: LiveLaunchConfig) -> dict[str, object]:
         "symbol": config.symbol,
         "direction": config.direction.value,
         "threshold": config.threshold,
-        "threshold_mode": "AUTO" if config.threshold is None else "FIXED",
+        "threshold_mode": config.threshold_mode.value,
+        "auto_threshold_enabled": config.threshold_mode is ThresholdMode.AUTO,
         "threshold_update_rate": config.threshold_update_rate,
         "parameter_set_path": str(config.parameter_set_path),
         "parameter_set_id": config.parameter_set_id,
@@ -275,10 +280,9 @@ def execute_live(
         run_id = DefaultIdGenerator().new_run_id(
             started_at_et.astimezone(), config.symbol, parameter_set.parameter_set_id
         )
-        threshold_mode = ThresholdMode.AUTO if config.threshold is None else ThresholdMode.FIXED
         context = RunContext(
             run_id, config.symbol, session.trade_date, parameter_set,
-            config.direction, threshold_mode, config.threshold,
+            config.direction, config.threshold_mode, config.threshold,
             RunMode.LIVE_PAPER, None, started_at_et, threshold_update_rate=config.threshold_update_rate,
         )
         state = RuntimeState.empty(parameter_set, config.threshold)

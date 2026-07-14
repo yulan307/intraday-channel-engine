@@ -90,8 +90,11 @@ selects exactly that row regardless of activity.
 
 Auto Threshold resets each date, initializes from the first completed Bar's
 raw `open`, and updates after a triggered BUY or SELL for the next Bar.
-`threshold_update_rate` is a 0-100 percentage (null or omitted is 0): BUY
-updates to `signal_price × (1 - rate/100)` and SELL updates to
+`threshold_update_rate` is a 0-100 percentage. With a numeric threshold, a
+numeric rate (including `0`) enables Auto and uses that threshold as the
+initial value; null or omission keeps Fixed mode. A null threshold remains
+Auto and initializes from the first Bar open. Auto BUY updates to
+`signal_price × (1 - rate/100)` and SELL updates to
 `signal_price × (1 + rate/100)`. That signal also resets the
 Trend and Channel state for the next Bar; the signal Bar itself retains the
 pre-reset calculation. Fixed Threshold never changes or resets either state.
