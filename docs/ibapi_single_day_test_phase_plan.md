@@ -690,7 +690,7 @@ Backtest 本地数据无效
 # Phase 4：Live Paper 行情接入
 
 > 本章下方早期 Phase 4 描述已由本文件末尾的
-> `Phase 4 Current-State Override (2026-07-14)` 覆盖；实施以该 override 为准。
+> Earlier Phase 4 text is superseded by the current-state section below.
 
 ## 7.1 目标
 
@@ -844,7 +844,7 @@ BAR_END
 
 ---
 
-## Phase 4 Current-State Override (2026-07-14)
+## Phase 4 Current State (2026-07-14)
 
 This section supersedes earlier Phase 4 text in this document.
 
@@ -899,7 +899,8 @@ The output buffer emits `AVAILABLE` with a bar, including the final `END` bar.
 After that final bar is extracted, the next event is `END`. An open session with
 an empty output buffer emits `WAITING`; its consumer calls `wait_for_change()`.
 If the final expected bar is absent after `session_end_et + 60 seconds`, raise.
-Late or repeated complete timestamps after output also raise. The fetch module
+Late or repeated complete timestamps after output are logged with the complete
+raw Bar and ordering context, skipped, and do not terminate the run. The fetch module
 cancels the request in `finally` for both completion and failure.
 
 All unexpected errors terminate without retry, recovery, reconnect, checkpoint,
@@ -1251,3 +1252,34 @@ flowchart TD
 ```
 
 作为 Phase 完成依据。
+
+---
+
+# Phase 5 Current State (2026-07-14)
+
+Phase 5 is implemented as a single-day Live Paper closed loop. The YAML-first
+Live CLI loads exactly one parameter set, validates the merged configuration,
+prints startup confirmation including `auto_threshold_enabled`, and waits for
+operator confirmation before runtime side effects. It resolves one ET
+session, creates `LIVE_PAPER` and `single_day_run` before pre-market waiting,
+then passes the existing Phase 4 `LivePaperFeed` to `SingleDayRunner`.
+
+The runner consumes `HIST`, `LIVE`, and `END` through the existing Trend,
+Channel, and Decision engines. `raw_1m_bar` is written by Phase 4 before the
+Runner receives each Bar. `processed_1m_bar` and an optional `signal_event`
+commit atomically before `RuntimeState` advances. `LivePaperFeed` owns
+deadline-aware waiting, and terminal `COMPLETED` or `FAILED` run status and
+summary writes are atomic. `live_phase` remains `NULL`.
+
+Live runs write `data/logs/<run_id>.jsonl`. Input validation exits normally
+with one `ERROR:` line, an `input_validation_error` event, exit code 2, and no
+traceback. Session selection and tiered pre-market waiting are logged. INFO
+diagnostics stop after the first successfully persisted Bar; errors, IBAPI
+callback context, and terminal summaries remain recorded. A five-minute
+terminal heartbeat starts after the first confirmed Bar. Late or duplicate
+completed Bars after emission are logged and skipped. Deterministic fake-clock
+and fake-feed tests cover completion, failure, cleanup, transaction boundaries,
+and shared `run_id` evidence; the real-TWS full-day test remains user-owned.
+
+Orders, retry, recovery, checkpointing, ranking, scan summaries, and automated
+real-TWS acceptance remain outside Phase 5.
