@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 from ..domain.enums import DecisionLabel, Direction, ThresholdMode
 from ..domain.models import DecisionResult
-from ..domain.parameters import ParameterSet
 
 
 @dataclass(frozen=True)
@@ -17,15 +16,14 @@ def resolve_threshold(
     mode: ThresholdMode,
     previous_threshold: float | None,
     processed_bar_count: int,
-    price: float,
-    params: ParameterSet,
+    opening_price: float,
 ) -> float | None:
     if mode is ThresholdMode.FIXED:
         return previous_threshold
     if previous_threshold is not None:
         return previous_threshold
-    if processed_bar_count + 1 == params.trend_window:
-        return price
+    if processed_bar_count == 0:
+        return opening_price
     return None
 
 

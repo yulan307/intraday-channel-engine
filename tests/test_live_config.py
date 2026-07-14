@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from single_day_test.application.live_cli import resolve_live_launch_config
-from single_day_test.domain.enums import Direction
+from single_day_test.application.live_cli import live_launch_configuration, resolve_live_launch_config
+from single_day_test.domain.enums import Direction, ThresholdMode
 from single_day_test.domain.errors import InputValidationError
 
 
@@ -50,3 +50,16 @@ def test_live_config_rejects_missing_or_unsupported_values(tmp_path: Path) -> No
 
     with pytest.raises(InputValidationError, match="unsupported fields"):
         resolve_live_launch_config(args(path))
+
+
+def test_live_config_allows_null_threshold_as_auto_mode(tmp_path: Path) -> None:
+    path = tmp_path / "live.yaml"
+    path.write_text(
+        "symbol: AAPL\ndirection: BUY\nthreshold: null\nparameter_set_path: params.csv\nparameter_set_id: p1\nib_environment: paper\ntrade_date: null\n",
+        encoding="utf-8",
+    )
+
+    configured = resolve_live_launch_config(args(path))
+
+    assert configured.threshold is None
+    assert live_launch_configuration(configured)["threshold_mode"] is ThresholdMode.AUTO.value

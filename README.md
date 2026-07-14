@@ -22,7 +22,7 @@ wait, processes `HIST`, `LIVE`, and `END` bars through `SingleDayRunner`, and
 writes `processed_1m_bar`, optional `signal_event`, and one atomic terminal
 `run_summary`/`single_day_run` status. Phase 4 continues to upsert
 `raw_1m_bar` before Phase 5 consumes each completed Bar. Live runs remain
-Fixed Threshold, paper-only, and have no order, retry, recovery, or checkpoint
+Fixed or Auto Threshold, paper-only, and have no order, retry, recovery, or checkpoint
 behavior.
 
 Each Live run writes `data/logs/<run_id>.jsonl` by default; use `--log-dir` to
@@ -36,6 +36,10 @@ overrides only its matching YAML field. `trade_date` is an optional ET date and
 maps to `--trade-date`; null selects today or the next tradable session after
 today's close. `ib_environment` selects the existing paper/live connection
 profile in `configs/ib.yaml`.
+
+Both CLI entrypoints print their validated, merged launch configuration and
+wait for Enter before creating runtime directories, opening SQLite, connecting
+to TWS, or requesting data.
 
 On Windows, `run_live.ps1` and `run_backtest.ps1` start the respective CLI from
 the project `.venv` and project root. They forward all arguments unchanged, so
@@ -55,7 +59,7 @@ time crosses the one-hour, ten-minute, and ten-second boundaries.
 removed `initial_threshold` column. It keeps all RawBar, request-provenance,
 parameter, Trend, Channel, and Decision fields as queryable columns.
 `active_threshold` is nullable and records the threshold actually used by the
-current Bar; Auto Threshold warm-up rows use `NULL`. The persisted `decision`
+current Bar. The persisted `decision`
 is `NULL` when no signal triggers and is `BUY` or `SELL` only for triggered
 signals. No JSON payload columns or persisted `_et` columns are used.
 
@@ -83,8 +87,8 @@ range. A non-empty `parameter_set_id` plus one selected date runs one daily
 backtest. An empty ID scans every `is_active = 1` parameter row; an explicit ID
 selects exactly that row regardless of activity.
 
-Auto Threshold resets each date, remains null until the Nth Bar where
-`N = trend_window`, initializes from that Bar's strategy price, and updates
+Auto Threshold resets each date, initializes from the first completed Bar's
+raw `open`, and updates
 after a triggered BUY or SELL for the next Bar. That signal also resets the
 Trend and Channel state for the next Bar; the signal Bar itself retains the
 pre-reset calculation. Fixed Threshold never changes or resets either state.

@@ -714,7 +714,7 @@ trade_date == current ET date
 The implemented Backtest flow scans selected parameter sets over an inclusive
 date range. One generated `run_id` spans every date for one parameter set;
 daily records use `(run_id, trade_date)`. Auto Threshold is application state:
-it is null during warm-up, initializes from the Nth Bar price, and updates for
+it initializes from the first completed Bar raw `open`, and updates for
 the Bar after a triggered BUY or SELL. A signal-driven update resets Trend and
 Channel state for that following Bar, while the signal Bar retains its existing
 calculation. `processed_1m_bar.decision` persists null for no action and only

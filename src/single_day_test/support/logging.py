@@ -21,7 +21,6 @@ class JsonLineLogger:
     def __init__(self, path: str | Path, clock: Clock) -> None:
         self.path = Path(path)
         self.clock = clock
-        self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def info(self, event: str, **fields: object) -> None:
         self._write("INFO", event, fields)
@@ -36,6 +35,7 @@ class JsonLineLogger:
             "event": event,
             **fields,
         }
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(record, default=str, sort_keys=True))
             stream.write("\n")

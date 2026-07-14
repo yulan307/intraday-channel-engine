@@ -9,7 +9,7 @@
 symbol: MU
 direction: BUY
 
-# Required finite Fixed Threshold used by the DecisionEngine.
+# A number selects Fixed Threshold; null selects Auto Threshold.
 threshold: 890
 
 # The selected row in the central parameter-set CSV. Phase 5 requires exactly one row.

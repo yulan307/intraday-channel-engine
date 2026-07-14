@@ -31,17 +31,21 @@ resolving its session and before any pre-market wait, then passes the Phase 4
 `END` bars through the existing engines, persists each committed result, and
 writes an atomic terminal summary plus run status.
 
-The CLI accepts the existing fixed-threshold inputs and adds `--log-dir`,
+The CLI accepts a numeric Fixed or null/omitted Auto threshold and adds `--log-dir`,
 which defaults to `data/logs`. Each run writes
 `<log_dir>/<run_id>.jsonl`. The log records run creation, committed bars,
 signals, completion, and failure. Phase 5 uses one injected `Clock`; production
 passes `SystemClock` and tests pass a fake clock.
 
 `configs/live_config.yaml` is the default Live launch configuration. It holds
-the symbol, direction, fixed threshold, parameter selection, IB environment,
+the symbol, direction, threshold, parameter selection, IB environment,
 and optional `trade_date`. All matching CLI options are optional and override
 only the corresponding YAML value when explicitly supplied. `trade_date` is
 the YAML/CLI name for the prior Live start-date selection.
+
+Before any runtime directory, SQLite, TWS, or data-request operation, both
+CLI entrypoints print their validated merged launch configuration and require
+the operator to press Enter.
 
 Input validation is handled at the CLI boundary as a normal exit: one concise
 `ERROR:` console line, one `input_validation_error` JSONL event, exit code 2,
@@ -60,7 +64,7 @@ waiting.
 Phase 4 is complete at the `CompletedBar` event boundary. Its current
 contract is:
 
-- the Live CLI accepts one symbol, direction, fixed threshold, parameter-set
+- the Live CLI accepts one symbol, direction, numeric Fixed or null/omitted Auto threshold, parameter-set
   path and parameter-set ID, with an optional start date;
 - the session resolver selects one tradable ET session and waits for its
   start when necessary;
@@ -104,7 +108,7 @@ feed tests remain independent because the feed interface is unchanged.
 
 ### 4.2 Run identity and configuration wiring
 
-The existing ID format, one selected parameter set, Fixed Threshold CLI value,
+The existing ID format, one selected parameter set, resolved threshold mode,
 and resolved session trade date populate `RunContext`. `live_phase` remains
 `NULL` by decision. The selected parameter snapshot is persisted through the
 existing run and processed-bar records.
@@ -186,7 +190,8 @@ change:
 - Phase 4 session resolution, callback classification, ordering, or request
   parameters;
 - the Phase 3 processed-bar schema or nullable decision contract;
-- Auto Threshold semantics unless separately approved;
+- the confirmed Auto Threshold semantics: first-Bar raw-open initialization and
+  signal-driven updates/reset behavior;
 - order, execution, recovery, checkpoint, ranking, or multi-day scan logic.
 
 ## 7. Completion State

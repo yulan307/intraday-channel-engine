@@ -8,9 +8,9 @@ fetches and continuously updates 1-minute RTH bars, classifies completed bars,
 persists emitted raw bars, and exposes output events.
 
 The Live CLI inputs are `symbol`, `direction` (`BUY` or `SELL`), a required
-numeric fixed `threshold`, `parameter_set_path`, `parameter_set_id`, and an
+numeric Fixed or null/omitted Auto `threshold`, `parameter_set_path`, `parameter_set_id`, and an
 optional ISO `start_date` (`YYYY-MM-DD`). One run accepts one symbol and one
-parameter set. Live mode does not allow an Auto threshold.
+parameter set. Live Paper allows the same Auto threshold mode as backtest.
 
 Phase 4 ends at the output-buffer interface. It does not invoke `process 1m
 bar`, strategy engines, processed-bar persistence, summaries, or order logic;
@@ -125,6 +125,5 @@ raise and terminate after request cancellation.
 
 - `process 1m bar` invocation, strategy calculation, processed-bar persistence,
   run summaries, and orders;
-- Auto threshold;
 - recovery, reconnect, retry, checkpoint, multi-day scanning, ranking, and
   strategy-math changes.

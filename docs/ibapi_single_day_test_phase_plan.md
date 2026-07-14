@@ -493,7 +493,7 @@ multi-date backtest. The parameter CSV has `is_active`; an empty requested ID
 selects every row with `is_active = 1`, while an explicit ID selects one row.
 The request uses `trade_date_start` / `trade_date_end` and one `threshold`.
 Numeric values are Fixed; omitted or null is Auto. Auto Threshold resets each
-date, initializes from the Nth Bar where N equals `trend_window`, and updates
+date, initializes from the first completed Bar raw `open`, and updates
 after triggered BUY or SELL for the following Bar. That signal-driven update
 resets Trend and Channel state for the following Bar, but not for the signal
 Bar itself. The persisted `processed_1m_bar.decision` is null without a
@@ -845,9 +845,9 @@ BAR_END
 This section supersedes earlier Phase 4 text in this document.
 
 Phase 4 is a dedicated Live CLI and Bar-fetch loop. Its inputs are one `symbol`,
-one `BUY`/`SELL` direction, a required numeric fixed threshold,
+one `BUY`/`SELL` direction, a numeric Fixed or null/omitted Auto threshold,
 `parameter_set_path`, `parameter_set_id`, and an optional `start_date` in
-`YYYY-MM-DD`. Live does not allow an Auto threshold. It does not invoke
+`YYYY-MM-DD`. Live allows Auto threshold. It does not invoke
 `process 1m bar`, strategy engines, processed-bar persistence, summaries, or
 orders; those remain Phase 5 or later.
 

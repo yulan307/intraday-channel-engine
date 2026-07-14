@@ -25,6 +25,7 @@ from ..support.clock import Clock, SystemClock
 from ..support.ids import DefaultIdGenerator
 from ..support.logging import JsonLineLogger
 from .single_day_runner import SingleDayRunner
+from .startup_confirmation import print_and_confirm_launch
 from .summary_service import build_failed_summary
 
 
@@ -39,7 +40,7 @@ _LIVE_CONFIG_FIELDS = {
 class LiveLaunchConfig:
     symbol: str
     direction: Direction
-    threshold: float
+    threshold: float | None
     parameter_set_path: Path
     parameter_set_id: str
     ib_environment: str
@@ -122,8 +123,14 @@ def resolve_live_launch_config(args: argparse.Namespace) -> LiveLaunchConfig:
         parsed_direction = Direction(direction)
     except ValueError as exc:
         raise InputValidationError("direction must be BUY or SELL") from exc
-    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not math.isfinite(float(threshold)):
-        raise InputValidationError("threshold must be finite")
+    if threshold == "":
+        raise InputValidationError("threshold must be numeric, null, or omitted; empty string is invalid")
+    if threshold is not None and (
+        isinstance(threshold, bool)
+        or not isinstance(threshold, (int, float))
+        or not math.isfinite(float(threshold))
+    ):
+        raise InputValidationError("threshold must be numeric, null, or omitted")
     if not isinstance(parameter_set_path, (str, Path)) or not str(parameter_set_path):
         raise InputValidationError("parameter_set_path is required")
     if not isinstance(parameter_set_id, str) or not parameter_set_id.strip():
@@ -138,9 +145,22 @@ def resolve_live_launch_config(args: argparse.Namespace) -> LiveLaunchConfig:
     if trade_date is not None and not isinstance(trade_date, date):
         raise InputValidationError("trade_date must be YYYY-MM-DD or null")
     return LiveLaunchConfig(
-        symbol.strip(), parsed_direction, float(threshold), Path(parameter_set_path),
+        symbol.strip(), parsed_direction, float(threshold) if threshold is not None else None, Path(parameter_set_path),
         parameter_set_id.strip(), ib_environment, trade_date,
     )
+
+
+def live_launch_configuration(config: LiveLaunchConfig) -> dict[str, object]:
+    return {
+        "symbol": config.symbol,
+        "direction": config.direction.value,
+        "threshold": config.threshold,
+        "threshold_mode": "AUTO" if config.threshold is None else "FIXED",
+        "parameter_set_path": str(config.parameter_set_path),
+        "parameter_set_id": config.parameter_set_id,
+        "ib_environment": config.ib_environment,
+        "trade_date": config.trade_date.isoformat() if config.trade_date else None,
+    }
 
 
 def resolve_live_session(repositories: SqliteRepositories, gateway: IbApiGateway, symbol: str,
@@ -226,6 +246,7 @@ def execute_live(
     sleep: Callable[[float], None] = time.sleep,
 ) -> None:
     config = resolve_live_launch_config(args)
+    print_and_confirm_launch("Live", live_launch_configuration(config))
     parameter_sets = load_parameter_sets(config.parameter_set_path, config.parameter_set_id)
     if len(parameter_sets) != 1:
         raise InputValidationError("Live Paper requires exactly one parameter set")
@@ -250,9 +271,10 @@ def execute_live(
         run_id = DefaultIdGenerator().new_run_id(
             started_at_et.astimezone(), config.symbol, parameter_set.parameter_set_id
         )
+        threshold_mode = ThresholdMode.AUTO if config.threshold is None else ThresholdMode.FIXED
         context = RunContext(
             run_id, config.symbol, session.trade_date, parameter_set,
-            config.direction, ThresholdMode.FIXED, config.threshold,
+            config.direction, threshold_mode, config.threshold,
             RunMode.LIVE_PAPER, None, started_at_et,
         )
         state = RuntimeState.empty(parameter_set, config.threshold)
