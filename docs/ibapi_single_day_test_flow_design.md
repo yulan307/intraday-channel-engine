@@ -1572,7 +1572,7 @@ ET 为起点。起点起连续四天的交易日、开盘和收盘信息先从 `
 
 ```text
 endDateTime = ""
-durationStr = ceil(now_et - session_start_et) + 10 seconds
+durationStr = max(60 seconds, ceil(now_et - session_start_et) + 10 seconds)
 barSize = "1 min"
 whatToShow = "TRADES"
 useRTH = 1

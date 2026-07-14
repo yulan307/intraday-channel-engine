@@ -58,6 +58,17 @@ def test_live_feed_merges_history_then_emits_live_and_end(tmp_path) -> None:
     feed.close(); assert gateway.handle.closed
 
 
+def test_live_feed_uses_ibkr_minimum_window_at_session_start(tmp_path) -> None:
+    clock = Clock(datetime(2025, 1, 2, 9, 30, tzinfo=ET))
+    session = TradingSession(date(2025, 1, 2), True, datetime(2025, 1, 2, 9, 30, tzinfo=ET), datetime(2025, 1, 2, 16, 0, tzinfo=ET))
+    database = Database(tmp_path / "minimum-window.sqlite3"); database.initialize(); repos = SqliteRepositories(database)
+    gateway = Gateway(); feed = LivePaperFeed("AAPL", session, gateway, repos, clock)
+
+    feed.start()
+
+    assert gateway.duration == 60
+
+
 def test_live_feed_ignores_only_first_pre_session_historical_boundary_bar(tmp_path) -> None:
     clock = Clock(datetime(2025, 1, 2, 9, 32, 10, tzinfo=ET))
     session = TradingSession(date(2025, 1, 2), True, datetime(2025, 1, 2, 9, 30, tzinfo=ET), datetime(2025, 1, 2, 9, 35, tzinfo=ET))

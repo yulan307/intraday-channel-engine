@@ -54,8 +54,9 @@ Excluded scope:
 Phase 4 Live Paper bar fetch is implemented. The dedicated Live CLI resolves
 four ET trading-session dates from the local `trade_date` cache or IBAPI,
 waits for the selected session start, and starts one `reqHistoricalData`
-request with `durationStr = elapsed session seconds + 10 seconds` and
-`keepUpToDate=True`. It emits ordered completed Bar events and
+request with `durationStr = max(60 seconds, elapsed session seconds + 10 seconds)`
+and `keepUpToDate=True`. The 60-second floor makes a request started exactly
+at session open valid for 1-minute bars. It emits ordered completed Bar events and
 upserts each emitted raw Bar to `raw_1m_bar`; it does not run strategy logic or
 place orders. `useRTH=1` filters non-RTH data, but an overlong duration skips
 non-RTH time and continues with prior-trading-date intraday RTH Bars; the fixed

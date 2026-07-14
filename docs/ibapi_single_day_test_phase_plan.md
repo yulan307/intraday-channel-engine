@@ -868,7 +868,7 @@ day instead.
 
 ```text
 reqHistoricalData(
-  endDateTime="", durationStr=ceil(now_et - session_start_et) + 10 seconds,
+  endDateTime="", durationStr=max(60 seconds, ceil(now_et - session_start_et) + 10 seconds),
   barSize="1 min", whatToShow="TRADES", useRTH=1, formatDate=2,
   keepUpToDate=True)
 ```
@@ -876,7 +876,8 @@ reqHistoricalData(
 No independent real-time subscription is used. `useRTH=1` filters non-RTH data;
 it does not constrain the result to the target date. If `durationStr` is larger
 than the target date's available RTH data, IBAPI skips non-RTH time and continues
-the lookback into prior-trading-date intraday RTH Bars. The `+10 seconds` margin
+the lookback into prior-trading-date intraday RTH Bars. The 60-second minimum
+keeps the 1-minute request valid at session open; the `+10 seconds` margin
 deliberately constrains that behavior. Session timestamp validation applies.
 IBKR may prepend one pre-session final-RTH Bar as
 the first initial historical callback; after structural validation, it is

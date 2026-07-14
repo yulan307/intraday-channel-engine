@@ -2431,7 +2431,9 @@ adapter in Phase 4.
 `useRTH=1` filters non-RTH data; it does not constrain data to the target date.
 If `durationStr` exceeds the target date's available RTH data, IBAPI skips
 non-RTH time and continues the lookback into prior-trading-date intraday RTH
-Bars. The fixed `+10 seconds` margin deliberately limits that lookback.
+Bars. The fixed `+10 seconds` margin deliberately limits that lookback, with a
+60-second minimum required when the request starts at session open for a
+1-minute bar request.
 
 The feed owns `hist_buffer`, a completed-only `live_buffer`, an output buffer,
 the latest in-progress timestamp, and the last emitted timestamp. The internal
