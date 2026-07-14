@@ -9,7 +9,7 @@ import pytest
 
 from single_day_test.bar_feed.live_paper_feed import LivePaperFeed
 from single_day_test.domain.enums import BarSource, FeedStatus
-from single_day_test.domain.errors import BarOrderingError, HistoricalDataError
+from single_day_test.domain.errors import HistoricalDataError
 from single_day_test.domain.models import RawBar, TradingSession
 from single_day_test.ib.gateway import LiveBarCallbacks
 from single_day_test.persistence.database import Database, SqliteRepositories
@@ -35,6 +35,18 @@ class Gateway:
         return self.handle
 
     def is_connected(self) -> bool: return True
+
+
+class Logger:
+    trace_enabled = True
+
+    def __init__(self) -> None:
+        self.errors: list[tuple[str, dict[str, object]]] = []
+
+    def info(self, event: str, **fields: object) -> None: pass
+    def summary(self, event: str, **fields: object) -> None: pass
+    def stop_info_trace(self) -> None: pass
+    def error(self, event: str, **fields: object) -> None: self.errors.append((event, fields))
 
 
 def bar(index: int, volume: float = 1) -> RawBar:
@@ -99,13 +111,59 @@ def test_live_feed_persists_initial_history_from_ibapi_callback_thread(tmp_path)
     assert database.connection.execute("SELECT COUNT(*) FROM raw_1m_bar").fetchone()[0] == 1
 
 
-def test_late_completed_bar_raises(tmp_path) -> None:
+def test_late_completed_bar_is_logged_and_ignored(tmp_path) -> None:
     clock = Clock(datetime(2025, 1, 2, 9, 32, tzinfo=ET))
     session = TradingSession(date(2025, 1, 2), True, datetime(2025, 1, 2, 9, 30, tzinfo=ET), datetime(2025, 1, 2, 9, 35, tzinfo=ET))
     database = Database(tmp_path / "late.sqlite3"); database.initialize(); repos = SqliteRepositories(database)
-    feed = LivePaperFeed("AAPL", session, Gateway(), repos, clock)
+    logger = Logger()
+    feed = LivePaperFeed("AAPL", session, Gateway(), repos, clock, logger=logger)
     feed._process_batch([bar(1)])
-    with pytest.raises(BarOrderingError): feed._process_batch([bar(0)])
+    feed._process_batch([bar(0)])
+
+    assert logger.errors == [("late_or_duplicate_completed_live_bar", {
+        "symbol": "AAPL",
+        "bar_timestamp": bar(0).timestamp_et.isoformat(),
+        "last_emitted_timestamp": bar(1).timestamp_et.isoformat(),
+        "reason": "late",
+        "date": bar(0).date,
+        "open": 100,
+        "high": 101,
+        "low": 99,
+        "close": 100,
+        "volume": 1,
+        "wap": 100,
+        "barCount": 1,
+    })]
+    assert feed.next_event().bar is not None and feed.next_event().status is FeedStatus.BAR_WAITING
+
+
+def test_duplicate_completed_bar_is_logged_and_ignored(tmp_path) -> None:
+    clock = Clock(datetime(2025, 1, 2, 9, 32, tzinfo=ET))
+    session = TradingSession(date(2025, 1, 2), True, datetime(2025, 1, 2, 9, 30, tzinfo=ET), datetime(2025, 1, 2, 9, 35, tzinfo=ET))
+    database = Database(tmp_path / "duplicate.sqlite3"); database.initialize(); repos = SqliteRepositories(database)
+    logger = Logger()
+    feed = LivePaperFeed("AAPL", session, Gateway(), repos, clock, logger=logger)
+    feed._process_batch([bar(1)])
+    feed._process_batch([bar(1, volume=2)])
+
+    assert logger.errors[0][0] == "late_or_duplicate_completed_live_bar"
+    assert logger.errors[0][1]["reason"] == "duplicate"
+    assert logger.errors[0][1]["volume"] == 2
+
+
+def test_late_completed_bar_does_not_discard_later_bar_in_same_batch(tmp_path) -> None:
+    clock = Clock(datetime(2025, 1, 2, 9, 32, tzinfo=ET))
+    session = TradingSession(date(2025, 1, 2), True, datetime(2025, 1, 2, 9, 30, tzinfo=ET), datetime(2025, 1, 2, 9, 35, tzinfo=ET))
+    database = Database(tmp_path / "batch-ordering.sqlite3"); database.initialize(); repos = SqliteRepositories(database)
+    logger = Logger()
+    feed = LivePaperFeed("AAPL", session, Gateway(), repos, clock, logger=logger)
+    feed._process_batch([bar(1)])
+    feed._process_batch([bar(0), bar(2)])
+
+    assert logger.errors[0][1]["reason"] == "late"
+    assert feed.next_event().bar is not None
+    assert feed.next_event().bar is not None
+    assert feed._last_emitted == bar(2).timestamp_et
 
 
 def test_live_feed_uses_session_deadlines_when_runner_waits_without_timeout(tmp_path) -> None:

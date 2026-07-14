@@ -83,7 +83,9 @@ those remain Phase 5 or later work.
 12. At `session_end_et`, the final expected bar is complete when present. If it
     is absent, wait until `session_end_et + 60 seconds`; then raise an error.
     A late completed bar with an earlier timestamp than an already emitted bar,
-    or a duplicate timestamp after emission, is an error.
+    or a duplicate timestamp after emission, is logged with the complete raw Bar
+    and ignored. Later valid Bars continue through the output buffer. Other
+    fetch, validation, persistence, and final-Bar timeout errors still raise.
 13. The Phase 4 verification consumer extracts output bars and logs them without
     invoking Phase 5 processing. In all normal and error
     paths, the fetch module cancels the request in `finally`.
@@ -119,8 +121,9 @@ The loop begins with a valid Live CLI request, resolves a tradable session,
 waits for the timer when necessary, starts one continuous historical request,
 turns completed bars into ordered output events, persists raw verification data,
 and reaches `END` after the final bar is extracted. Missing final data, invalid
-data, ordering violations, persistence failures, and other unexpected failures
-raise and terminate after request cancellation.
+data, persistence failures, and other unexpected failures raise and terminate
+after request cancellation. A late or duplicate completed Bar after emission is
+logged and skipped without terminating the run.
 
 ## Explicit Exclusions
 

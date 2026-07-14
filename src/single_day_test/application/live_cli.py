@@ -325,7 +325,7 @@ def execute_live(
                 + " ".join(f"{key}={value}" for key, value in fields.items())
             )
 
-        feed = LivePaperFeed(config.symbol, session, gateway, repositories, clock, heartbeat)
+        feed = LivePaperFeed(config.symbol, session, gateway, repositories, clock, heartbeat, run_logger)
         runner_started = True
         summary = SingleDayRunner(database, repositories, clock, run_logger).execute_run(
             context, feed, state, create_run=False, on_first_bar_confirmed=feed.mark_first_bar_confirmed,

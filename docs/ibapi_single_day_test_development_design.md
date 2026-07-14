@@ -2423,6 +2423,10 @@ class LivePaperFeed:
     def close(self) -> None: ...
 ```
 
+The feed accepts an optional `StructuredLogger`; the Live CLI passes the
+current run logger so recoverable ordering events are written to the run's
+JSONL audit log and mirrored to the terminal.
+
 `start()` sends exactly one `reqHistoricalData` request with empty end time,
 seconds from session start plus 10 seconds, `1 min`, `TRADES`, `useRTH=1`,
 `formatDate=2`, and `keepUpToDate=True`. There is no separate live-subscription
@@ -2476,10 +2480,13 @@ an open session emits `BAR_WAITING`; the consumer then calls `wait_for_change()`
 
 For duplicate buffered timestamps, keep greater volume. With equal volume and
 different fields, keep live and log both bars. A duplicate after emission or a
-late timestamp earlier than an emitted timestamp raises. If the last expected
-bar is absent after `session_end_et + 60 seconds`, raise. Any unexpected fetch
-error raises directly; it is not delivered as a process-bar event. `close()` and
-all error/final paths cancel the request in `finally`.
+late timestamp earlier than an emitted timestamp is logged as an
+`late_or_duplicate_completed_live_bar` ERROR event with the complete raw Bar,
+the reason, and the last emitted timestamp, then skipped. Later valid Bars in
+the same batch continue to be processed. If the last expected bar is absent
+after `session_end_et + 60 seconds`, raise. Any unexpected fetch error raises
+directly; it is not delivered as a process-bar event. `close()` and all
+error/final paths cancel the request in `finally`.
 
 ### Phase boundary and verification
 
