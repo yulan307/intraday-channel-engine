@@ -97,7 +97,7 @@ def test_nonconforming_schema_is_cleared_once(tmp_path) -> None:
     path = tmp_path / "legacy.sqlite3"
     sqlite3.connect(path).execute("CREATE TABLE raw_1m_bar (timestamp TEXT)").connection.commit()
     database = Database(path); database.initialize()
-    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "phase3_expand_v2"
+    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "phase3_expand_v3"
 
 
 def test_previous_phase3_schema_is_cleared_once_and_recreated(tmp_path) -> None:
@@ -111,7 +111,7 @@ def test_previous_phase3_schema_is_cleared_once_and_recreated(tmp_path) -> None:
     database.connection.commit()
     database.initialize()
     assert database.connection.execute("SELECT COUNT(*) FROM raw_1m_bar").fetchone()[0] == 0
-    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "phase3_expand_v2"
+    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "phase3_expand_v3"
     columns = {row[1] for row in database.connection.execute("PRAGMA table_info(processed_1m_bar)")}
     assert {"date", "timestamp", "wap", "bar_count", "bar_size", "what_to_show", "use_rth", "source", "trend_slope", "channel_pred_high", "decision_triggered"} <= columns
     assert not any(column.lower().endswith("_et") or column.lower() == "et" for column in columns)

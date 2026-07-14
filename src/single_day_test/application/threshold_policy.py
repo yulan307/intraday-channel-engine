@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 from ..domain.enums import DecisionLabel, Direction, ThresholdMode
 from ..domain.models import DecisionResult
+from ..domain.errors import InputValidationError
 
 
 @dataclass(frozen=True)
@@ -40,7 +42,21 @@ def next_threshold(
     active_threshold: float | None,
     price: float,
     decision: DecisionResult,
+    direction: Direction,
+    update_rate: float,
 ) -> float | None:
     if mode is ThresholdMode.AUTO and decision.triggered:
-        return price
+        multiplier = 1 - update_rate / 100 if direction is Direction.BUY else 1 + update_rate / 100
+        return price * multiplier
     return active_threshold
+
+
+def parse_threshold_update_rate(value: object) -> float:
+    if value is None:
+        return 0.0
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+        raise InputValidationError("threshold_update_rate must be a finite number from 0 to 100")
+    rate = float(value)
+    if not 0 <= rate <= 100:
+        raise InputValidationError("threshold_update_rate must be from 0 to 100")
+    return rate

@@ -43,6 +43,7 @@ class RunRequest:
     direction: Direction
     threshold_mode: ThresholdMode
     fixed_threshold: float | None
+    threshold_update_rate: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,7 @@ class RunContext:
     mode: RunMode
     live_phase: LivePhase | None
     started_at_et: datetime
+    threshold_update_rate: float = 0.0
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "started_at_et", _normalize_dt(self.started_at_et))

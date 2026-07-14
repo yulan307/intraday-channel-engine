@@ -32,7 +32,8 @@ def process_bar(context: RunContext, bar: CompletedBar, state: RuntimeState, tre
     record=ProcessedBarRecord(context.run_id,context.symbol,context.trade_date,bar.raw.timestamp_et,context.mode,bar.source,context.direction,context.parameter_set.parameter_set_id,asdict(context.parameter_set),active_threshold,bar.raw.open,bar.raw.high,bar.raw.low,bar.raw.close,bar.raw.volume,bar.raw.wap,bar.raw.barCount,trend,channel,decision)
     event=SignalEvent(context.run_id,bar.raw.timestamp_et,decision.decision,trend.price,decision.recorded_break_count) if decision.triggered else None
     next_active_threshold = next_threshold(
-        context.threshold_mode, active_threshold, trend.price, decision
+        context.threshold_mode, active_threshold, trend.price, decision,
+        context.direction, context.threshold_update_rate,
     )
     if context.threshold_mode is ThresholdMode.AUTO and decision.triggered:
         next_trend = TrendState.empty(context.parameter_set)

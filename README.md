@@ -81,6 +81,7 @@ Backtest startup defaults are stored in `configs/backtest.yaml`. Run
 `python -m single_day_test.application.backtest_cli` to use it, or pass
 `--config` for another YAML file. Every supplied CLI option overrides only its
 matching YAML field. The YAML supplies the symbol, direction, threshold,
+`threshold_update_rate`,
 parameter CSV selection, inclusive trade-date range, IB profile, database, and
 IB config path. One date field selects one date; both select the inclusive
 range. A non-empty `parameter_set_id` plus one selected date runs one daily
@@ -88,12 +89,14 @@ backtest. An empty ID scans every `is_active = 1` parameter row; an explicit ID
 selects exactly that row regardless of activity.
 
 Auto Threshold resets each date, initializes from the first completed Bar's
-raw `open`, and updates
-after a triggered BUY or SELL for the next Bar. That signal also resets the
+raw `open`, and updates after a triggered BUY or SELL for the next Bar.
+`threshold_update_rate` is a 0-100 percentage (null or omitted is 0): BUY
+updates to `signal_price × (1 - rate/100)` and SELL updates to
+`signal_price × (1 + rate/100)`. That signal also resets the
 Trend and Channel state for the next Bar; the signal Bar itself retains the
 pre-reset calculation. Fixed Threshold never changes or resets either state.
 
-The database schema is `phase3_expand_v2`. During initialization, any
+The database schema is `phase3_expand_v3`. During initialization, any
 nonconforming Phase 3 table shape causes the complete Phase 3 database to be
 cleared and recreated; no old data is migrated or retained.
 

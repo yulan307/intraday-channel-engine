@@ -13,7 +13,7 @@ from ..domain.enums import RunStatus
 from ..domain.errors import PersistenceError
 from ..domain.models import ProcessedBarRecord, RawBar, RunContext, RunSummary, SignalEvent, TradingSession
 
-SCHEMA_VERSION = "phase3_expand_v2"
+SCHEMA_VERSION = "phase3_expand_v3"
 
 
 class Database:
@@ -64,7 +64,7 @@ class Database:
           run_id TEXT NOT NULL, trade_date TEXT NOT NULL, symbol TEXT NOT NULL, mode TEXT NOT NULL,
           live_phase TEXT, direction TEXT NOT NULL, parameter_set_id TEXT NOT NULL,
           parameter_snapshot_json TEXT NOT NULL, threshold_mode TEXT NOT NULL,
-          fixed_threshold REAL, status TEXT NOT NULL, started_at_epoch INTEGER NOT NULL,
+          fixed_threshold REAL, threshold_update_rate REAL NOT NULL, status TEXT NOT NULL, started_at_epoch INTEGER NOT NULL,
           ended_at_epoch INTEGER, error_type TEXT, error_message TEXT,
           PRIMARY KEY(run_id, trade_date));
         CREATE TABLE processed_1m_bar (
@@ -109,7 +109,7 @@ class Database:
             "schema_meta": ["key", "value"],
             "trade_date": ["trade_date", "is_trading_day", "session_start_epoch", "session_end_epoch", "source", "created_at_epoch", "updated_at_epoch"],
             "raw_1m_bar": ["symbol", "date", "open", "high", "low", "close", "volume", "wap", "bar_count", "bar_size", "what_to_show", "use_rth", "source", "created_at_epoch", "updated_at_epoch"],
-            "single_day_run": ["run_id", "trade_date", "symbol", "mode", "live_phase", "direction", "parameter_set_id", "parameter_snapshot_json", "threshold_mode", "fixed_threshold", "status", "started_at_epoch", "ended_at_epoch", "error_type", "error_message"],
+            "single_day_run": ["run_id", "trade_date", "symbol", "mode", "live_phase", "direction", "parameter_set_id", "parameter_snapshot_json", "threshold_mode", "fixed_threshold", "threshold_update_rate", "status", "started_at_epoch", "ended_at_epoch", "error_type", "error_message"],
             "processed_1m_bar": ["run_id", "date", "timestamp", "symbol", "trade_date", "mode", "bar_source", "direction", "parameter_set_id", "trend_window", "slope_std_window", "dev_window", "residual_window", "r2_threshold", "channel_high_percentile", "channel_low_percentile", "continuous_break_count", "active_threshold", "open", "high", "low", "close", "volume", "wap", "bar_count", "bar_size", "what_to_show", "use_rth", "source", "trend_price", "trend_slope", "trend_r2", "trend_slope_rmse", "trend_slope_std", "trend_fit_ok", "trend_raw_trend", "trend_stack_length_after", "channel_pred_high", "channel_pred_low", "channel_effective_trend", "channel_last_trend_slope", "channel_last_trend_intercept", "channel_last_trend_bar_count", "channel_last_high_percentile", "channel_last_low_percentile", "channel_curr_trend_slope", "channel_curr_trend_intercept", "channel_curr_high_percentile", "channel_curr_low_percentile", "channel_stack_length_after", "decision", "decision_recorded_break_count", "decision_triggered"],
             "signal_event": ["run_id", "date", "decision", "price", "break_count"],
             "run_summary": ["run_id", "trade_date", "status", "processed_bar_count", "signal_count", "final_curr_slope", "final_curr_intercept", "final_high_percentile", "final_low_percentile", "final_channel_length", "started_at_epoch", "ended_at_epoch", "error_type", "error_message"],
@@ -179,7 +179,7 @@ class SqliteRepositories:
 
     def create(self, context: RunContext) -> None:
         with self.database.transaction():
-            self.database.connection.execute('INSERT INTO single_day_run VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (context.run_id,context.trade_date.isoformat(),context.symbol,context.mode.value,context.live_phase.value if context.live_phase else None,context.direction.value,context.parameter_set.parameter_set_id,json.dumps(context.parameter_set.__dict__),context.threshold_mode.value,context.fixed_threshold,RunStatus.RUNNING.value,_epoch(context.started_at_et),None,None,None))
+            self.database.connection.execute('INSERT INTO single_day_run VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (context.run_id,context.trade_date.isoformat(),context.symbol,context.mode.value,context.live_phase.value if context.live_phase else None,context.direction.value,context.parameter_set.parameter_set_id,json.dumps(context.parameter_set.__dict__),context.threshold_mode.value,context.fixed_threshold,context.threshold_update_rate,RunStatus.RUNNING.value,_epoch(context.started_at_et),None,None,None))
 
     def mark_completed(self, run_id: str, trade_date: date, ended_at_et: datetime) -> None: self._mark(run_id, trade_date, RunStatus.COMPLETED, ended_at_et, None)
     def mark_failed(self, run_id: str, trade_date: date, ended_at_et: datetime, error_type: str, error_message: str) -> None: self._mark(run_id, trade_date, RunStatus.FAILED, ended_at_et, (error_type,error_message))

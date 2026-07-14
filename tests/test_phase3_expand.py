@@ -110,6 +110,33 @@ def test_auto_signal_updates_threshold_and_resets_trend_and_channel_for_next_bar
     assert transition.next_state_after_persist.channel == ChannelState.empty()
 
 
+@pytest.mark.parametrize(
+    ("direction", "pred_high", "pred_low", "expected_threshold"),
+    [
+        (Direction.BUY, 100.0, None, 94.5),
+        (Direction.SELL, None, 110.0, 115.5),
+    ],
+)
+def test_auto_signal_applies_directional_threshold_update_rate(
+    direction: Direction,
+    pred_high: float | None,
+    pred_low: float | None,
+    expected_threshold: float,
+) -> None:
+    params = _params()
+    context = RunContext(
+        "run-1", "AAPL", date(2025, 1, 2), params, direction, ThresholdMode.AUTO,
+        None, RunMode.BACKTEST, None, datetime(2025, 1, 2, 9, 0, tzinfo=ET), threshold_update_rate=10.0,
+    )
+    transition = process_bar(
+        context, _bar(3, 105.0), RuntimeState.empty(params, 110.0 if direction is Direction.BUY else 100.0),
+        _SignalTrendEngine(105.0), _SignalChannelEngine(pred_high, pred_low), DecisionEngine(),
+    )
+
+    assert transition.record.decision.triggered
+    assert transition.next_state_after_persist.active_threshold == pytest.approx(expected_threshold)
+
+
 def test_fixed_signal_preserves_trend_and_channel_state() -> None:
     params = _params()
     context = RunContext("run-1", "AAPL", date(2025, 1, 2), params, Direction.BUY, ThresholdMode.FIXED, 110.0, RunMode.BACKTEST, None, datetime(2025, 1, 2, 9, 0, tzinfo=ET))
@@ -141,7 +168,7 @@ def _backtest_args(config: Path, **overrides: object) -> argparse.Namespace:
 def test_yaml_backtest_config_applies_defaults_and_cli_overrides(tmp_path: Path) -> None:
     path = tmp_path / "backtest.yaml"
     path.write_text(
-        "symbol: AAPL\ndirection: SELL\nthreshold: 0\nparameter_set_path: configs/parameter_set.csv\n"
+        "symbol: AAPL\ndirection: SELL\nthreshold: 0\nthreshold_update_rate: 12.5\nparameter_set_path: configs/parameter_set.csv\n"
         "parameter_set_id: ''\ntrade_date_start: 2025-01-02\ntrade_date_end: 2025-01-03\n"
         "ib_environment: paper\ndatabase: data/test.sqlite3\nib_config: configs/ib.yaml\n",
         encoding="utf-8",
@@ -150,6 +177,7 @@ def test_yaml_backtest_config_applies_defaults_and_cli_overrides(tmp_path: Path)
     assert configured.request.symbol == "AAPL"
     assert configured.request.threshold_mode is ThresholdMode.FIXED
     assert configured.request.fixed_threshold == 0.0
+    assert configured.request.threshold_update_rate == 12.5
     assert configured.request.trade_dates == (date(2025, 1, 2), date(2025, 1, 3))
     assert configured.parameter_set_id == ""
     overridden = resolve_backtest_launch_config(
@@ -164,12 +192,16 @@ def test_yaml_backtest_config_applies_defaults_and_cli_overrides(tmp_path: Path)
     assert overridden.request.symbol == "MSFT"
     assert overridden.request.direction is Direction.BUY
     assert overridden.request.fixed_threshold == 150.0
+    assert overridden.request.threshold_update_rate == 12.5
     assert overridden.parameter_set_path == Path("other.csv")
     assert overridden.parameter_set_id == "p1"
     assert overridden.request.trade_dates == (date(2025, 1, 3),)
     assert overridden.ib_environment == "live"
     assert overridden.database == Path("other.sqlite3")
     assert overridden.ib_config == Path("other-ib.yaml")
+
+    path.write_text(path.read_text(encoding="utf-8").replace("threshold_update_rate: 12.5", "threshold_update_rate:"), encoding="utf-8")
+    assert resolve_backtest_launch_config(_backtest_args(path), date(2025, 1, 3)).request.threshold_update_rate == 0.0
 
 
 def test_yaml_backtest_config_rejects_unknown_or_invalid_values(tmp_path: Path) -> None:
@@ -259,6 +291,21 @@ def test_schema_shape_mismatch_is_rebuilt_and_processed_fields_are_exact(tmp_pat
     assert "unexpected" not in columns
     assert "initial_threshold" not in columns
     assert columns[17] == "active_threshold"
+
+
+def test_run_persists_threshold_update_rate(tmp_path) -> None:
+    database = Database(tmp_path / "rate.sqlite3")
+    database.initialize()
+    repositories = SqliteRepositories(database)
+    context = RunContext(
+        "run-1", "AAPL", date(2025, 1, 2), _params(), Direction.BUY,
+        ThresholdMode.AUTO, None, RunMode.BACKTEST, None, datetime(2025, 1, 2, 9, 0, tzinfo=ET),
+        threshold_update_rate=12.5,
+    )
+
+    repositories.create(context)
+
+    assert database.connection.execute("SELECT threshold_update_rate FROM single_day_run").fetchone()[0] == 12.5
 
 
 def test_failed_day_keeps_partial_processed_rows_in_final_csv(tmp_path) -> None:
