@@ -28,25 +28,31 @@ def _params() -> ParameterSet:
     return ParameterSet("p1", 3, 3, 1, 1, 0.8, 95.0, 95.0, 1, 1)
 
 
-def _bar(index: int, price: float = 100.0) -> CompletedBar:
+def _bar(index: int, price: float = 100.0, opening_price: float | None = None) -> CompletedBar:
     timestamp = datetime(2025, 1, 2, 9, 30, tzinfo=ET) + timedelta(minutes=index)
-    return CompletedBar(RawBar("AAPL", int(timestamp.timestamp()), price, price + 1, price - 1, price, 1, price, 1), BarSource.HIST)
+    return CompletedBar(RawBar("AAPL", int(timestamp.timestamp()), opening_price if opening_price is not None else price, price + 1, price - 1, price, 1, price, 1), BarSource.HIST)
 
 
 def _context(mode: ThresholdMode) -> RunContext:
     return RunContext("run-1", "AAPL", date(2025, 1, 2), _params(), Direction.BUY, mode, 100.0 if mode is ThresholdMode.FIXED else None, RunMode.BACKTEST, None, datetime(2025, 1, 2, 9, 0, tzinfo=ET))
 
 
-def test_auto_threshold_warmup_then_uses_nth_bar_price() -> None:
+def test_auto_threshold_uses_first_completed_bar_open() -> None:
     context = _context(ThresholdMode.AUTO)
     state = RuntimeState.empty(context.parameter_set)
     records = []
-    for index in range(3):
-        transition = process_bar(context, _bar(index, 100.0 + index), state, TrendEngine(), ChannelEngine(), DecisionEngine())
+    for index, price in enumerate((100.0, 101.0, 102.0)):
+        transition = process_bar(
+            context,
+            _bar(index, price, 90.0 if index == 0 else None),
+            state,
+            TrendEngine(),
+            ChannelEngine(),
+            DecisionEngine(),
+        )
         records.append(transition.record)
         state = transition.next_state_after_persist
-    assert [record.active_threshold for record in records] == [None, None, 102.0]
-    assert [record.decision.decision for record in records[:2]] == [DecisionLabel.NO_BUY, DecisionLabel.NO_BUY]
+    assert [record.active_threshold for record in records] == [90.0, 90.0, 90.0]
 
 
 class _SignalTrendEngine:

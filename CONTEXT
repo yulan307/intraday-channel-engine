@@ -30,9 +30,9 @@ Implemented scope:
   `parameter_set_id` overrides that filter. Each selected parameter set gets a
   generated run ID and scans selected dates in ascending order. One selected
   date with one non-empty `parameter_set_id` resolves to one daily backtest.
-- Fixed Threshold remains unchanged. Auto Threshold resets every date, writes
-  null during warm-up, initializes from the Nth Bar where N is `trend_window`,
-  and updates after triggered BUY or SELL for the next Bar. A signal-driven
+- Fixed Threshold remains unchanged. Auto Threshold resets every date,
+  initializes from the first completed Bar's raw `open`, and updates after
+  triggered BUY or SELL for the next Bar. A signal-driven
   Auto Threshold update resets Trend and Channel state for that next Bar; the
   signal Bar retains its pre-reset calculations.
 - `single_day_run` and daily `run_summary` use `(run_id, trade_date)` keys.
@@ -77,12 +77,14 @@ test is deferred to the user. Orders, recovery, checkpointing, performance
 ranking, and scan-level summary remain excluded.
 
 Live startup configuration is YAML-first. `configs/live_config.yaml` supplies
-`symbol`, `direction`, Fixed `threshold`, parameter CSV path and ID,
+`symbol`, `direction`, numeric Fixed or null/omitted Auto `threshold`, parameter CSV path and ID,
 `ib_environment`, and optional ET `trade_date`. An explicitly supplied CLI
 option overrides the matching YAML value. A null `trade_date` retains the
 existing current-or-next-tradable-session selection.
 
-Live CLI input validation is an expected error exit: it prints one `ERROR:`
+Both CLIs print the validated merged launch configuration and wait for Enter
+before creating runtime directories, opening SQLite, connecting TWS, or
+requesting data. Live CLI input validation is an expected error exit: it prints one `ERROR:`
 line, logs `input_validation_error` to `startup.jsonl` before a run ID exists
 (or the run JSONL log afterward), and exits with code 2 without a traceback.
 After session resolution it logs and prints requested/selected dates and the

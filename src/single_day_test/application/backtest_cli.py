@@ -27,6 +27,7 @@ from ..persistence.database import Database, SqliteRepositories
 from ..support.clock import SystemClock
 from ..support.ids import DefaultIdGenerator, IdGenerator
 from .single_day_runner import SingleDayRunner
+from .startup_confirmation import print_and_confirm_launch
 from .summary_service import build_failed_summary, build_skipped_summary
 
 
@@ -227,9 +228,26 @@ def resolve_backtest_launch_config(args: argparse.Namespace, today_et: date) -> 
     )
 
 
+def backtest_launch_configuration(config: BacktestLaunchConfig) -> dict[str, object]:
+    return {
+        "symbol": config.request.symbol,
+        "direction": config.request.direction.value,
+        "threshold": config.request.fixed_threshold,
+        "threshold_mode": config.request.threshold_mode.value,
+        "parameter_set_path": str(config.parameter_set_path),
+        "parameter_set_id": config.parameter_set_id,
+        "trade_date_start": config.request.trade_dates[0].isoformat(),
+        "trade_date_end": config.request.trade_dates[-1].isoformat(),
+        "ib_environment": config.ib_environment,
+        "database": str(config.database),
+        "ib_config": str(config.ib_config),
+    }
+
+
 def main() -> None:
     args = _args()
     config = resolve_backtest_launch_config(args, datetime.now(_ET).date())
+    print_and_confirm_launch("Backtest", backtest_launch_configuration(config))
     config.database.parent.mkdir(parents=True, exist_ok=True)
     parameter_sets = load_parameter_sets(config.parameter_set_path, config.parameter_set_id)
     database = Database(config.database)

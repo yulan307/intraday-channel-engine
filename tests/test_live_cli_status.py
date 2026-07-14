@@ -134,7 +134,7 @@ def test_main_converts_invalid_effective_config_to_logged_exit_code_two(tmp_path
         live_cli.main()
 
     assert raised.value.code == 2
-    assert capsys.readouterr().out == "ERROR: threshold must be finite\n"
+    assert capsys.readouterr().out == "ERROR: threshold must be numeric, null, or omitted\n"
     event = json.loads((tmp_path / "logs" / "startup.jsonl").read_text(encoding="utf-8").strip())
     assert event["event"] == "input_validation_error"
 
@@ -153,6 +153,7 @@ def test_main_converts_invalid_requested_date_to_logged_exit_code_two(tmp_path: 
     )
     monkeypatch.setattr(live_cli, "_args", lambda: args)
     monkeypatch.setattr(live_cli, "IbApiGateway", Gateway)
+    monkeypatch.setattr(live_cli, "print_and_confirm_launch", lambda *_args: None)
 
     with pytest.raises(SystemExit) as raised:
         live_cli.main()

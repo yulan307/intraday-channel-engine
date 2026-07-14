@@ -18,7 +18,7 @@ def process_bar(context: RunContext, bar: CompletedBar, state: RuntimeState, tre
     trend, next_trend = trend_engine.update(bar,state.trend,context.parameter_set)
     channel, next_channel = channel_engine.update(bar,trend,state.channel,context.parameter_set)
     active_threshold = resolve_threshold(
-        context.threshold_mode, state.active_threshold, state.processed_bar_count, trend.price, context.parameter_set
+        context.threshold_mode, state.active_threshold, state.processed_bar_count, bar.raw.open
     )
     if active_threshold is None:
         decision = no_threshold_decision(context.direction)

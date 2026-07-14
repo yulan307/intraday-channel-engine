@@ -167,7 +167,7 @@ threshold is missing or null
 
 Separate `initial_threshold` and `active_threshold` request fields are not
 part of this input contract. `active_threshold` is runtime state, and the
-resolved Auto initial threshold is determined from the Nth Bar.
+resolved Auto initial threshold is the first completed Bar raw `open`.
 
 ## 6. Run ID and Daily Result Rules
 
@@ -239,8 +239,8 @@ When the threshold is absent or explicitly `null`:
 threshold_mode = AUTO
 ```
 
-Auto Threshold is valid for backtest execution. The threshold is reset at the
-start of every trade date.
+Auto Threshold is valid for backtest and Live Paper execution. The threshold
+is reset at the start of every trade date.
 
 For each date:
 
@@ -248,13 +248,7 @@ For each date:
 active_threshold = None
 ```
 
-Let:
-
-```text
-N = parameter_set.trend_window
-```
-
-The first threshold is set from the price of the Nth completed Bar. After a
+The first threshold is set from the raw `open` of the first completed Bar. After a
 BUY or SELL signal is triggered, the signal price becomes the threshold for
 the following Bars on that same date.
 
@@ -262,8 +256,8 @@ the following Bars on that same date.
 start of date
     -> active_threshold = None
 
-Nth Bar
-    -> active_threshold = Nth Bar price
+first completed Bar
+    -> active_threshold = first Bar raw open
 
 BUY or SELL signal on Bar k
     -> Bar k uses the previous threshold
@@ -274,12 +268,8 @@ next trade date
     -> threshold resets to None
 ```
 
-The price used for initialization and BUY updates must be the same strategy
-price used by Decision evaluation. The current implementation uses
-`TrendResult.price`; Auto Threshold must use that same price definition.
-
-Before the Nth Bar, `active_threshold` is `null`. The Decision output is the
-direction-specific no-signal result: `NO_BUY` for BUY and `NO_SELL` for SELL.
+The initial Auto threshold uses raw `open`; later signal-driven updates
+continue to use `TrendResult.price`.
 
 ## 8. Auto Threshold Flow
 
@@ -287,14 +277,8 @@ direction-specific no-signal result: `NO_BUY` for BUY and `NO_SELL` for SELL.
 flowchart TD
     A[Start trade date] --> B[Reset daily RuntimeState]
     B --> C[active_threshold = None]
-    C --> D{Current Bar is Nth Bar?}
-
-    D -->|No| E[Accumulate Trend and Channel state]
-    E --> F[Persist null threshold and direction-specific no-signal Decision]
-    F --> D
-
-    D -->|Yes| G[Set threshold to Nth Bar price]
-    G --> H[Evaluate current Bar]
+    C --> D[Set threshold to first Bar raw open]
+    D --> H[Evaluate current Bar]
     H --> I{BUY or SELL triggered?}
     I -->|No| J[Keep threshold]
     I -->|Yes| K[Update threshold after current Bar]
@@ -310,7 +294,7 @@ the same Bar twice with two different thresholds.
 After a triggered Auto Threshold update, the next Bar also starts with empty
 Trend and Channel state. The engines remain shared, stateless algorithms; the
 application replaces only their input states. Fixed Threshold and the initial
-Nth-Bar Auto Threshold resolution do not reset either state.
+first-Bar Auto Threshold resolution do not reset either state.
 
 ## 9. Threshold State Ownership
 
@@ -361,8 +345,8 @@ status
 
 `processed_1m_bar` retains the Phase 3 v5 fields and order except for removed
 `initial_threshold`; it stores only the threshold used by the current Bar decision.
-Its threshold column is nullable: Auto warm-up Bars persist `null`; Fixed mode
-and resolved Auto Bars persist the actual threshold used for that Bar. Separate
+Its threshold column is nullable for compatibility; Fixed mode and every
+processed Auto Bar persist the actual threshold used for that Bar. Separate
 initial-threshold and final-threshold persistence is not required in this
 scope.
 
@@ -377,9 +361,6 @@ scope.
 - An absent or explicit `null` threshold selects `AUTO` mode.
 - `AUTO` mode is valid only for backtest execution.
 - `AUTO` mode uses `N = trend_window`.
-- If a date has fewer than `N` usable completed Bars, the Auto Threshold
-  cannot be resolved; the daily run is recorded as `FAILED` and subsequent
-  dates continue.
 - Fixed mode never updates its threshold after BUY or SELL.
 - Auto mode resets its threshold at the start of every trade date.
 - Auto mode updates its threshold only after a triggered BUY or SELL and
@@ -418,9 +399,9 @@ scope.
 | E3-004 | `run_id` identifies one parameter set across multiple dates. | Accepted |
 | E3-005 | A provided threshold selects Fixed mode. | Accepted |
 | E3-006 | Fixed threshold never changes after BUY or SELL. | Accepted |
-| E3-007 | Missing or null threshold selects Auto mode for backtest. | Accepted |
+| E3-007 | Missing or null threshold selects Auto mode for backtest and Live Paper. | Accepted |
 | E3-008 | Auto threshold resets at the start of every trade date. | Accepted |
-| E3-009 | Auto initial threshold is the Nth Bar price, where N equals `trend_window`. | Accepted |
+| E3-009 | Auto initial threshold is the first completed Bar raw open. | Accepted |
 | E3-010 | A triggered BUY or SELL updates the threshold for the following Bars of the same date. | Accepted |
 | E3-011 | Trend, Channel, Decision, BarFeed, and common data-processing behavior remain unchanged. | Accepted |
 | E3-012 | Parameter CSV rows use `is_active`; value `1` selects rows for the default scan. | Accepted |
@@ -431,7 +412,7 @@ scope.
 | E3-017 | Invalid date order or an end date later than the current ET date causes validation failure and process exit. | Accepted |
 | E3-018 | The request has one `threshold` field; a value selects Fixed mode and missing/null selects Auto mode. | Accepted |
 | E3-019 | `threshold = 0` is a valid Fixed threshold. | Accepted |
-| E3-020 | Auto warm-up Bars persist a null current threshold and a direction-specific no-signal Decision. | Accepted |
+| E3-020 | Auto's first processed Bar persists its raw-open threshold; no-signal rows retain direction-specific internal decisions. | Accepted |
 | E3-021 | Each date records COMPLETED, FAILED, or SKIPPED and does not prevent later dates from running. | Accepted |
 | E3-022 | One `run_id` exports one multi-day `processed_1m_bar` CSV; scan summaries are out of scope. | Accepted |
 | E3-023 | The expanded persistence schema is rebuilt once; existing database data is not migrated or retained. | Accepted |
