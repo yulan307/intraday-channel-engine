@@ -39,7 +39,9 @@ passes `SystemClock` and tests pass a fake clock.
 
 `configs/live_config.yaml` is the default Live launch configuration. It holds
 the symbol, direction, threshold, parameter selection, IB environment,
-and optional `trade_date`. All matching CLI options are optional and override
+optional `threshold_update_rate`, and optional `trade_date`. The rate is a
+0-100 YAML percentage (null or omitted is 0) applied only to Auto signal
+updates: BUY subtracts it and SELL adds it to the signal price. All matching CLI options are optional and override
 only the corresponding YAML value when explicitly supplied. `trade_date` is
 the YAML/CLI name for the prior Live start-date selection.
 

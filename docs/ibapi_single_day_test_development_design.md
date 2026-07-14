@@ -715,7 +715,9 @@ The implemented Backtest flow scans selected parameter sets over an inclusive
 date range. One generated `run_id` spans every date for one parameter set;
 daily records use `(run_id, trade_date)`. Auto Threshold is application state:
 it initializes from the first completed Bar raw `open`, and updates for
-the Bar after a triggered BUY or SELL. A signal-driven update resets Trend and
+the Bar after a triggered BUY or SELL. `threshold_update_rate` is a 0-100
+percentage (null or omitted is zero): BUY subtracts it and SELL adds it to the
+signal price. A signal-driven update resets Trend and
 Channel state for that following Bar, while the signal Bar retains its existing
 calculation. `processed_1m_bar.decision` persists null for no action and only
 `BUY` or `SELL` for triggered signals. `docs/phase3_expand.md` is authoritative
@@ -1778,24 +1780,23 @@ PRIMARY KEY(symbol, timestamp)
 ### 21.3 `single_day_run`
 
 ```text
-run_id                  TEXT PRIMARY KEY
+run_id                  TEXT NOT NULL
+trade_date              TEXT NOT NULL
 symbol                  TEXT NOT NULL
-trade_date              DATE NOT NULL
 mode                    TEXT NOT NULL
 live_phase              TEXT NULL
 direction               TEXT NOT NULL
-
 parameter_set_id        TEXT NOT NULL
 parameter_snapshot_json TEXT NOT NULL
-
-initial_threshold       REAL NOT NULL
-active_threshold        REAL NOT NULL
-
+threshold_mode          TEXT NOT NULL
+fixed_threshold         REAL NULL
+threshold_update_rate   REAL NOT NULL
 status                  TEXT NOT NULL
-started_at_et           TIMESTAMP NOT NULL
-ended_at_et             TIMESTAMP NULL
+started_at_epoch        INTEGER NOT NULL
+ended_at_epoch          INTEGER NULL
 error_type              TEXT NULL
 error_message           TEXT NULL
+PRIMARY KEY(run_id, trade_date)
 ```
 
 ### 21.4 `processed_1m_bar`

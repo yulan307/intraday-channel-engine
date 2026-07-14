@@ -17,13 +17,13 @@ Implemented scope:
   used for the current Bar decision. Its `decision` value is null when no
   signal triggers, and otherwise is `BUY` or `SELL`. There are no JSON payload
   columns and no persisted `_et` columns.
-- The SQLite schema is `phase3_expand_v2`. Initialization verifies its shape;
+- The SQLite schema is `phase3_expand_v3`. Initialization verifies its shape;
   any incompatible Phase 3 tables are cleared and recreated together. Existing
   data is intentionally not migrated or retained.
 - Backtest startup is YAML-first through `configs/backtest.yaml`; explicit
   `backtest_cli` options override only their matching YAML field. The YAML
   requires one `symbol`, one `direction`, `trade_date_start` and/or
-  `trade_date_end`, one `threshold`, parameter CSV selection, IB profile,
+  `trade_date_end`, `threshold_update_rate`, parameter CSV selection, IB profile,
   database, and IB config path. The CLI remains the sole backtest entry point
   and generated run IDs cannot be overridden.
 - `is_active = 1` selects default parameter rows. An explicit
@@ -32,10 +32,13 @@ Implemented scope:
   date with one non-empty `parameter_set_id` resolves to one daily backtest.
 - Fixed Threshold remains unchanged. Auto Threshold resets every date,
   initializes from the first completed Bar's raw `open`, and updates after
-  triggered BUY or SELL for the next Bar. A signal-driven
+  triggered BUY or SELL for the next Bar. `threshold_update_rate` is a 0-100
+  percent YAML value (null or omitted means 0): BUY applies `1 - rate/100` and
+  SELL applies `1 + rate/100` to the signal price. A signal-driven
   Auto Threshold update resets Trend and Channel state for that next Bar; the
   signal Bar retains its pre-reset calculations.
-- `single_day_run` and daily `run_summary` use `(run_id, trade_date)` keys.
+- `single_day_run` records `threshold_update_rate`; it and daily `run_summary`
+  use `(run_id, trade_date)` keys.
   Non-trading days are `SKIPPED`; failures are `FAILED`; later dates continue.
   Partial processed rows from failed dates remain in the one multi-day
   `data/<run_id>.csv` export.

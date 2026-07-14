@@ -27,12 +27,13 @@ from ..support.logging import JsonLineLogger
 from .single_day_runner import SingleDayRunner
 from .startup_confirmation import print_and_confirm_launch
 from .summary_service import build_failed_summary
+from .threshold_policy import parse_threshold_update_rate
 
 
 DEFAULT_LIVE_CONFIG = Path("configs/live_config.yaml")
 _LIVE_CONFIG_FIELDS = {
     "symbol", "direction", "threshold", "parameter_set_path",
-    "parameter_set_id", "ib_environment", "trade_date",
+    "parameter_set_id", "ib_environment", "trade_date", "threshold_update_rate",
 }
 
 
@@ -45,6 +46,7 @@ class LiveLaunchConfig:
     parameter_set_id: str
     ib_environment: str
     trade_date: date | None
+    threshold_update_rate: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -115,6 +117,7 @@ def resolve_live_launch_config(args: argparse.Namespace) -> LiveLaunchConfig:
     parameter_set_id = selected("parameter_set_id")
     ib_environment = selected("ib_environment")
     trade_date = selected("trade_date")
+    threshold_update_rate = parse_threshold_update_rate(values.get("threshold_update_rate"))
     if not isinstance(symbol, str) or not symbol.strip():
         raise InputValidationError("symbol is required")
     if not isinstance(direction, str):
@@ -146,7 +149,7 @@ def resolve_live_launch_config(args: argparse.Namespace) -> LiveLaunchConfig:
         raise InputValidationError("trade_date must be YYYY-MM-DD or null")
     return LiveLaunchConfig(
         symbol.strip(), parsed_direction, float(threshold) if threshold is not None else None, Path(parameter_set_path),
-        parameter_set_id.strip(), ib_environment, trade_date,
+        parameter_set_id.strip(), ib_environment, trade_date, threshold_update_rate,
     )
 
 
@@ -156,6 +159,7 @@ def live_launch_configuration(config: LiveLaunchConfig) -> dict[str, object]:
         "direction": config.direction.value,
         "threshold": config.threshold,
         "threshold_mode": "AUTO" if config.threshold is None else "FIXED",
+        "threshold_update_rate": config.threshold_update_rate,
         "parameter_set_path": str(config.parameter_set_path),
         "parameter_set_id": config.parameter_set_id,
         "ib_environment": config.ib_environment,
@@ -275,7 +279,7 @@ def execute_live(
         context = RunContext(
             run_id, config.symbol, session.trade_date, parameter_set,
             config.direction, threshold_mode, config.threshold,
-            RunMode.LIVE_PAPER, None, started_at_et,
+            RunMode.LIVE_PAPER, None, started_at_et, threshold_update_rate=config.threshold_update_rate,
         )
         state = RuntimeState.empty(parameter_set, config.threshold)
         logger = JsonLineLogger(args.log_dir / f"{run_id}.jsonl", clock)

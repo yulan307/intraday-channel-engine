@@ -29,13 +29,14 @@ from ..support.ids import DefaultIdGenerator, IdGenerator
 from .single_day_runner import SingleDayRunner
 from .startup_confirmation import print_and_confirm_launch
 from .summary_service import build_failed_summary, build_skipped_summary
+from .threshold_policy import parse_threshold_update_rate
 
 
 DEFAULT_BACKTEST_CONFIG = Path("configs/backtest.yaml")
 _ET = ZoneInfo("America/New_York")
 _BACKTEST_CONFIG_FIELDS = {
     "symbol", "direction", "threshold", "parameter_set_path", "parameter_set_id",
-    "trade_date_start", "trade_date_end", "ib_environment", "database", "ib_config",
+    "trade_date_start", "trade_date_end", "ib_environment", "database", "ib_config", "threshold_update_rate",
 }
 
 
@@ -46,6 +47,7 @@ class BacktestScanRequest:
     trade_dates: tuple[date, ...]
     threshold_mode: ThresholdMode
     fixed_threshold: float | None
+    threshold_update_rate: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -90,7 +92,7 @@ class BacktestScanner:
                 context = RunContext(
                     run_id, request.symbol, trade_date, params, request.direction,
                     request.threshold_mode, request.fixed_threshold, RunMode.BACKTEST,
-                    None, self.started_at_local,
+                    None, self.started_at_local, threshold_update_rate=getattr(request, "threshold_update_rate", 0.0),
                 )
                 state = RuntimeState.empty(params, request.fixed_threshold)
                 self.repositories.create(context)
@@ -191,6 +193,7 @@ def resolve_backtest_launch_config(args: argparse.Namespace, today_et: date) -> 
     ib_environment = selected("ib_environment")
     database = selected("database")
     ib_config = selected("ib_config")
+    threshold_update_rate = parse_threshold_update_rate(values.get("threshold_update_rate"))
     if not isinstance(symbol, str) or not symbol.strip():
         raise InputValidationError("symbol is required")
     if not isinstance(direction, str):
@@ -220,7 +223,7 @@ def resolve_backtest_launch_config(args: argparse.Namespace, today_et: date) -> 
     request = BacktestScanRequest(
         symbol.strip(), parsed_direction,
         _parse_dates(selected("trade_date_start"), selected("trade_date_end"), today_et),
-        threshold_mode, fixed_threshold,
+        threshold_mode, fixed_threshold, threshold_update_rate,
     )
     return BacktestLaunchConfig(
         request, Path(parameter_set_path), parameter_set_id.strip() if isinstance(parameter_set_id, str) else None,
@@ -234,6 +237,7 @@ def backtest_launch_configuration(config: BacktestLaunchConfig) -> dict[str, obj
         "direction": config.request.direction.value,
         "threshold": config.request.fixed_threshold,
         "threshold_mode": config.request.threshold_mode.value,
+        "threshold_update_rate": config.request.threshold_update_rate,
         "parameter_set_path": str(config.parameter_set_path),
         "parameter_set_id": config.parameter_set_id,
         "trade_date_start": config.request.trade_dates[0].isoformat(),

@@ -12,6 +12,9 @@ direction: BUY
 # A number selects Fixed Threshold; null selects Auto Threshold.
 threshold: 890
 
+# Auto signal updates: 0-100 percent. Null or omitted uses 0 (the signal price).
+threshold_update_rate: 0
+
 # The selected row in the central parameter-set CSV. Phase 5 requires exactly one row.
 parameter_set_path: configs/parameter_set.csv
 parameter_set_id: mu-phase3-v1

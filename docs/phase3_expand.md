@@ -86,7 +86,7 @@ symbols in one request are not supported.
 
 The YAML uses `parameter_set_path` to select the central parameter CSV and an
 optional `parameter_set_id` to control parameter-set selection. It also owns
-`symbol`, `direction`, `threshold`, `trade_date_start`, `trade_date_end`,
+`symbol`, `direction`, `threshold`, `threshold_update_rate`, `trade_date_start`, `trade_date_end`,
 `ib_environment`, `database`, and `ib_config`.
 
 Example:
@@ -97,6 +97,7 @@ direction: BUY
 trade_date_start: 2026-01-02
 trade_date_end: 2026-01-05
 threshold: null
+threshold_update_rate: 0
 parameter_set_path: configs/parameter_set.csv
 parameter_set_id: ""
 ib_environment: paper
@@ -168,6 +169,11 @@ threshold is missing or null
 Separate `initial_threshold` and `active_threshold` request fields are not
 part of this input contract. `active_threshold` is runtime state, and the
 resolved Auto initial threshold is the first completed Bar raw `open`.
+
+`threshold_update_rate` is an optional 0-100 percentage. Null or omission
+means `0`, preserving the signal-price update. It applies only after a
+triggered Auto signal: BUY uses `price × (1 - rate / 100)` and SELL uses
+`price × (1 + rate / 100)`.
 
 ## 6. Run ID and Daily Result Rules
 
@@ -261,15 +267,15 @@ first completed Bar
 
 BUY or SELL signal on Bar k
     -> Bar k uses the previous threshold
-    -> Bar k + 1 uses the signal price
+    -> Bar k + 1 uses the direction-adjusted signal price
     -> Bar k + 1 starts with empty TrendState and ChannelState
 
 next trade date
     -> threshold resets to None
 ```
 
-The initial Auto threshold uses raw `open`; later signal-driven updates
-continue to use `TrendResult.price`.
+The initial Auto threshold uses raw `open`; later signal-driven updates use
+`TrendResult.price` adjusted by `threshold_update_rate`.
 
 ## 8. Auto Threshold Flow
 
@@ -315,6 +321,7 @@ Daily runtime state
     -> ChannelState
     -> DecisionState
     -> threshold_mode
+    -> threshold_update_rate
     -> active_threshold
     -> daily signal state
 ```
@@ -364,7 +371,9 @@ scope.
 - Fixed mode never updates its threshold after BUY or SELL.
 - Auto mode resets its threshold at the start of every trade date.
 - Auto mode updates its threshold only after a triggered BUY or SELL and
-  applies the new value from the following Bar.
+  applies the direction-adjusted value from the following Bar.
+- `threshold_update_rate` must be finite and in `[0, 100]`; missing or null
+  resolves to `0`.
 - No state is shared between parameter sets or trade dates.
 - The YAML must contain exactly one `symbol`.
 - At least one of `trade_date_start` and `trade_date_end` must be provided.
@@ -403,6 +412,7 @@ scope.
 | E3-008 | Auto threshold resets at the start of every trade date. | Accepted |
 | E3-009 | Auto initial threshold is the first completed Bar raw open. | Accepted |
 | E3-010 | A triggered BUY or SELL updates the threshold for the following Bars of the same date. | Accepted |
+| E3-025 | `threshold_update_rate` adjusts Auto signal updates: BUY subtracts and SELL adds the configured percentage. | Accepted |
 | E3-011 | Trend, Channel, Decision, BarFeed, and common data-processing behavior remain unchanged. | Accepted |
 | E3-012 | Parameter CSV rows use `is_active`; value `1` selects rows for the default scan. | Accepted |
 | E3-013 | A provided `parameter_set_id` selects only that row and overrides `is_active`. | Accepted |
