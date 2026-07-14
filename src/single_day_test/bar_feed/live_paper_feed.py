@@ -6,11 +6,12 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 
 from ..domain.enums import BarSource, FeedStatus
-from ..domain.errors import BarOrderingError, HistoricalDataError
+from ..domain.errors import HistoricalDataError
 from ..domain.models import CompletedBar, RawBar, TradingSession
 from ..ib.gateway import IbGateway, LiveBarCallbacks, SubscriptionHandle
 from ..persistence.raw_bar_repository import RawBarRepository
 from ..support.clock import Clock
+from ..support.logging import StructuredLogger
 from .bar_validation import validate_raw_bar
 from .base import FeedEvent
 
@@ -20,7 +21,8 @@ class LivePaperFeed:
 
     def __init__(self, symbol: str, session: TradingSession, gateway: IbGateway,
                  raw_bars: RawBarRepository, clock: Clock,
-                 heartbeat: Callable[[dict[str, object]], None] | None = None) -> None:
+                 heartbeat: Callable[[dict[str, object]], None] | None = None,
+                 logger: StructuredLogger | None = None) -> None:
         if session.session_start_et is None or session.session_end_et is None:
             raise HistoricalDataError("Live session requires start and end timestamps")
         self.symbol, self.session, self.gateway, self.raw_bars, self.clock = symbol, session, gateway, raw_bars, clock
@@ -37,6 +39,7 @@ class LivePaperFeed:
         self._error: Exception | None = None
         self._subscription: SubscriptionHandle | None = None
         self._heartbeat = heartbeat
+        self._logger = logger
         self._next_heartbeat_at: datetime | None = None
 
     def start(self) -> None:
@@ -133,7 +136,9 @@ class LivePaperFeed:
                 chosen[bar.timestamp_et] = (bar, bar.timestamp_et in self._live)
         for timestamp in sorted(chosen):
             if self._last_emitted is not None and timestamp <= self._last_emitted:
-                raise BarOrderingError(f"Late or duplicate completed live bar: {timestamp.isoformat()}")
+                bar, _ = chosen[timestamp]
+                self._log_ignored_ordering_bar(bar)
+                continue
             bar, _ = chosen[timestamp]
             end = self.session.session_end_et
             assert end is not None
@@ -141,6 +146,26 @@ class LivePaperFeed:
             self.raw_bars.upsert_many([bar], bar_size="1 min", what_to_show="TRADES", use_rth=True)
             self._output.append(CompletedBar(bar, source))
             self._last_emitted = timestamp
+
+    def _log_ignored_ordering_bar(self, bar: RawBar) -> None:
+        if self._logger is None or self._last_emitted is None:
+            return
+        timestamp = bar.timestamp_et
+        self._logger.error(
+            "late_or_duplicate_completed_live_bar",
+            symbol=bar.symbol,
+            bar_timestamp=timestamp.isoformat(),
+            last_emitted_timestamp=self._last_emitted.isoformat(),
+            reason="duplicate" if timestamp == self._last_emitted else "late",
+            date=bar.date,
+            open=bar.open,
+            high=bar.high,
+            low=bar.low,
+            close=bar.close,
+            volume=bar.volume,
+            wap=bar.wap,
+            barCount=bar.barCount,
+        )
 
     def _finalize_end(self) -> None:
         end = self.session.session_end_et

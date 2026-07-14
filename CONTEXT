@@ -79,6 +79,10 @@ deadline. Terminal `run_summary` and `single_day_run` status are written in one
 transaction for both `COMPLETED` and `FAILED` runs. Each Live run writes a
 JSONL audit log at `data/logs/<run_id>.jsonl` by default. Phase 4 continues to
 write `raw_1m_bar` before Phase 5 processes the corresponding completed Bar.
+If a completed live Bar arrives late or duplicates an already emitted timestamp,
+the feed logs the complete raw Bar and ordering context, skips that Bar, and
+continues the run; other fetch, validation, persistence, and final-Bar timeout
+errors remain terminal.
 
 The Phase 5 automated suite uses fake clocks and feeds. A real-TWS full-day
 test is deferred to the user. Orders, recovery, checkpointing, performance
