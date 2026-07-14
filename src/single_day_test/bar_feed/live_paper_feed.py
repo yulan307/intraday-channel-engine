@@ -39,7 +39,7 @@ class LivePaperFeed:
         now = self.clock.now_et()
         start = self.session.session_start_et
         assert start is not None
-        seconds = max(1, int((now - start).total_seconds()) + 10)
+        seconds = max(60, int((now - start).total_seconds()) + 10)
         self._subscription = self.gateway.start_live_1m_bars(
             self.symbol, seconds,
             LiveBarCallbacks(self._on_historical, self._on_historical_end, self._on_update),

@@ -36,7 +36,7 @@ those remain Phase 5 or later work.
 
    ```text
    endDateTime = ""
-   durationStr = ceil(now_et - session_start_et) + 10 seconds
+   durationStr = max(60 seconds, ceil(now_et - session_start_et) + 10 seconds)
    barSize = "1 min"
    whatToShow = "TRADES"
    useRTH = 1
@@ -50,7 +50,8 @@ those remain Phase 5 or later work.
    non-RTH time and continues the lookback with prior-trading-date intraday RTH
    bars. The `+10 seconds` margin is deliberately small to constrain that
    behavior. IBKR may prepend one prior-session final RTH bar as the
-   first initial historical callback. That first pre-session bar is an ignored
+   first initial historical callback. The 60-second minimum is required when
+   the request starts exactly at session open. That first pre-session bar is an ignored
    callback boundary, after structural OHLCV validation; it is not target
    session data. Every other timestamp is validated against the resolved
    session and a session-external bar is an error rather than silently filtered.

@@ -6,13 +6,13 @@ Phase 3 Expand uses IBAPI as the only raw-market-data contract. Historical
 strategy processing.
 
 Phase 4 provides the Live Paper completed-Bar feed. It uses
-one `reqHistoricalData(..., durationStr=elapsed session seconds + 10 seconds,
+one `reqHistoricalData(..., durationStr=max(60 seconds, elapsed session seconds + 10 seconds),
 useRTH=1, keepUpToDate=True)` request, persists
 each emitted raw Bar to `raw_1m_bar`, and stops before strategy execution or
 orders. `useRTH=1` filters non-RTH data but does not constrain the response to
 the target date: an overlong duration skips non-RTH time and returns prior
-trading-date intraday RTH Bars. The live request uses only a `+10 seconds`
-margin. IBKR can prepend the previous session's final RTH Bar as the first
+trading-date intraday RTH Bars. The live request uses a `+10 seconds` margin
+with a 60-second minimum window for 1-minute bars. IBKR can prepend the previous session's final RTH Bar as the first
 initial historical callback; only that structurally valid pre-session boundary
 Bar is ignored. Other session-external Bars terminate the fetch.
 
