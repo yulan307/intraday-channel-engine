@@ -30,7 +30,9 @@ choose another directory. The JSONL file records run creation, committed Bars,
 signals, completion, and failure. The final real-TWS full-day validation is
 performed manually; the automated suite uses fake clocks and feeds.
 
-Live startup defaults are stored in `configs/live_config.yaml`. Start without
+Live startup defaults are stored in the local, ignored `configs/live_config.yaml`.
+Use `configs/live_config_sample.yaml` as the tracked setup template when setting
+up a checkout. Start without
 strategy arguments to use that YAML file; an explicitly supplied CLI option
 overrides only its matching YAML field. `trade_date` is an optional ET date and
 maps to `--trade-date`; null selects today or the next tradable session after
@@ -77,7 +79,9 @@ recorded as `SKIPPED`; failed dates are recorded as `FAILED` and later dates
 continue. One multi-day CSV is exported at `data/<run_id>.csv` after all dates
 have been attempted; partial rows written before a failed date remain included.
 
-Backtest startup defaults are stored in `configs/backtest.yaml`. Run
+Backtest startup defaults are stored in the local, ignored `configs/backtest.yaml`.
+Use `configs/backtest_config_sample.yaml` as the tracked setup template when
+setting up a checkout. Run
 `python -m single_day_test.application.backtest_cli` to use it, or pass
 `--config` for another YAML file. Every supplied CLI option overrides only its
 matching YAML field. The YAML supplies the symbol, direction, threshold,
@@ -99,7 +103,9 @@ Auto and initializes from the first Bar open. Auto BUY updates to
 Trend and Channel state for the next Bar; the signal Bar itself retains the
 pre-reset calculation. Fixed Threshold never changes or resets either state.
 
-The database schema is `phase3_expand_v3`. During initialization, any
+The tracked parameter template is `configs/parameter_set_sample.csv`; the runtime
+`configs/parameter_set.csv` is local and ignored. The database schema is
+`phase3_expand_v3`. During initialization, any
 nonconforming Phase 3 table shape causes the complete Phase 3 database to be
 cleared and recreated; no old data is migrated or retained.
 
