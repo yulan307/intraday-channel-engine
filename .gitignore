@@ -8,3 +8,9 @@ __pycache__/
 build/
 dist/
 data/*.sqlite3
+
+# Local runtime configuration and generated data.
+configs/backtest.yaml
+configs/live_config.yaml
+configs/parameter_set.csv
+data/

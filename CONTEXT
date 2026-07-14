@@ -20,7 +20,8 @@ Implemented scope:
 - The SQLite schema is `phase3_expand_v3`. Initialization verifies its shape;
   any incompatible Phase 3 tables are cleared and recreated together. Existing
   data is intentionally not migrated or retained.
-- Backtest startup is YAML-first through `configs/backtest.yaml`; explicit
+- Backtest startup is YAML-first through the local `configs/backtest.yaml`; the
+  tracked setup template is `configs/backtest_config_sample.yaml`. Explicit
   `backtest_cli` options override only their matching YAML field. The YAML
   requires one `symbol`, one `direction`, `trade_date_start` and/or
   `trade_date_end`, `threshold_update_rate`, parameter CSV selection, IB profile,
@@ -82,7 +83,8 @@ The Phase 5 automated suite uses fake clocks and feeds. A real-TWS full-day
 test is deferred to the user. Orders, recovery, checkpointing, performance
 ranking, and scan-level summary remain excluded.
 
-Live startup configuration is YAML-first. `configs/live_config.yaml` supplies
+Live startup configuration is YAML-first. The local `configs/live_config.yaml`
+supplies
 `symbol`, `direction`, numeric Fixed or null/omitted Auto `threshold`, parameter CSV path and ID,
 `ib_environment`, and optional ET `trade_date`. An explicitly supplied CLI
 option overrides the matching YAML value. A null `trade_date` retains the
@@ -91,7 +93,10 @@ existing current-or-next-tradable-session selection.
 Both CLIs print the validated merged launch configuration and wait for Enter
 before creating runtime directories, opening SQLite, connecting TWS, or
 requesting data. The printed configuration explicitly includes
-`auto_threshold_enabled`. Live CLI input validation is an expected error exit: it prints one `ERROR:`
+`auto_threshold_enabled`. Use `configs/live_config_sample.yaml` as the tracked
+setup template. The tracked parameter template is
+`configs/parameter_set_sample.csv`; runtime `configs/parameter_set.csv` is local
+and ignored. Live CLI input validation is an expected error exit: it prints one `ERROR:`
 line, logs `input_validation_error` to `startup.jsonl` before a run ID exists
 (or the run JSONL log afterward), and exits with code 2 without a traceback.
 After session resolution it logs and prints requested/selected dates and the
