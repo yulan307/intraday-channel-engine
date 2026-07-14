@@ -923,6 +923,9 @@ Live CLI 的输入校验错误以正常退出处理：控制台仅输出一行 `
 `input_validation_error` JSONL 事件；run ID 尚未生成时写入
 `<log_dir>/startup.jsonl`，生成后写入该 run 的日志，进程以退出码 2 结束且不输出
 traceback。会话解析后会输出并记录请求日期、当前 ET 时间、选中日期和选择原因；
+启动 YAML 必须提供 `log_level: INFO | ERROR`。INFO 详细记录仅持续到首根 Bar
+成功持久化；之后运行继续且仅记录 error 与终态。所有 IBAPI `error(...)` 回调保留
+完整上下文；匹配 live 请求的错误会终止 feed。Live 在首根确认 Bar 后每五分钟输出终端心跳。
 开盘前等待会立即输出一次状态，并按剩余时间在 1 小时、15 分钟、1 分钟或 1 秒的
 频率输出 `session_waiting`。这不改变 Feed 原有的 session-end/final-Bar 等待。
 

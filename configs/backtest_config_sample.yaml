@@ -31,3 +31,6 @@ trade_date_end: null
 ib_environment: paper
 database: data/intraday_channel.sqlite3
 ib_config: configs/ib.yaml
+
+# INFO writes startup-through-first-bar diagnostics; ERROR writes only errors and final summaries.
+log_level: INFO

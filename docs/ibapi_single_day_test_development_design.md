@@ -2503,5 +2503,9 @@ empty output, and commits one processed Bar plus any signal before advancing
 runtime state. `LivePaperFeed` computes the unbounded wait deadline from the
 session end and final-bar timeout. Completed and failed terminal records write
 the run status and summary atomically. Live runs write structured JSONL audit
-events to `data/logs/<run_id>.jsonl` by default. There is no order, retry,
+events to `data/logs/<run_id>.jsonl` by default. Startup YAML requires
+`log_level: INFO | ERROR`; INFO detail ends after the first persisted Bar while
+errors and terminal summaries remain. Every IBAPI error callback is recorded
+with callback context, matching live-request errors fail the feed, and Live
+prints a five-minute terminal heartbeat after the first confirmed Bar. There is no order, retry,
 recovery, checkpoint, or automated real-TWS test in this Phase.

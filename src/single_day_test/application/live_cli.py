@@ -23,7 +23,7 @@ from ..ib.gateway import IbApiGateway
 from ..persistence.database import Database, SqliteRepositories
 from ..support.clock import Clock, SystemClock
 from ..support.ids import DefaultIdGenerator
-from ..support.logging import JsonLineLogger
+from ..support.logging import JsonLineLogger, TerminalMirrorLogger
 from .single_day_runner import SingleDayRunner
 from .startup_confirmation import print_and_confirm_launch
 from .summary_service import build_failed_summary
@@ -34,6 +34,7 @@ DEFAULT_LIVE_CONFIG = Path("configs/live_config.yaml")
 _LIVE_CONFIG_FIELDS = {
     "symbol", "direction", "threshold", "parameter_set_path",
     "parameter_set_id", "ib_environment", "trade_date", "threshold_update_rate",
+    "log_level",
 }
 
 
@@ -48,6 +49,7 @@ class LiveLaunchConfig:
     ib_environment: str
     trade_date: date | None
     threshold_update_rate: float = 0.0
+    log_level: str = "INFO"
 
 
 @dataclass(frozen=True)
@@ -66,7 +68,8 @@ class LiveCliReporter:
         self.logger = logger
 
     def info(self, event: str, message: str, **fields: object) -> None:
-        print(message)
+        if self.logger.trace_enabled:
+            print(message)
         self.logger.info(event, **fields)
 
     def input_validation_error(self, error: InputValidationError) -> None:
@@ -119,6 +122,7 @@ def resolve_live_launch_config(args: argparse.Namespace) -> LiveLaunchConfig:
     ib_environment = selected("ib_environment")
     trade_date = selected("trade_date")
     threshold_update_rate_raw = values.get("threshold_update_rate")
+    log_level = values.get("log_level")
     threshold_update_rate = parse_threshold_update_rate(threshold_update_rate_raw)
     if not isinstance(symbol, str) or not symbol.strip():
         raise InputValidationError("symbol is required")
@@ -149,11 +153,13 @@ def resolve_live_launch_config(args: argparse.Namespace) -> LiveLaunchConfig:
             raise InputValidationError("trade_date must be YYYY-MM-DD or null") from exc
     if trade_date is not None and not isinstance(trade_date, date):
         raise InputValidationError("trade_date must be YYYY-MM-DD or null")
+    if log_level not in {"INFO", "ERROR"}:
+        raise InputValidationError("log_level must be INFO or ERROR")
     fixed_threshold = float(threshold) if threshold is not None else None
     return LiveLaunchConfig(
         symbol.strip(), parsed_direction, fixed_threshold,
         resolve_config_threshold_mode(fixed_threshold, threshold_update_rate_raw is not None), Path(parameter_set_path),
-        parameter_set_id.strip(), ib_environment, trade_date, threshold_update_rate,
+        parameter_set_id.strip(), ib_environment, trade_date, threshold_update_rate, log_level,
     )
 
 
@@ -169,6 +175,7 @@ def live_launch_configuration(config: LiveLaunchConfig) -> dict[str, object]:
         "parameter_set_id": config.parameter_set_id,
         "ib_environment": config.ib_environment,
         "trade_date": config.trade_date.isoformat() if config.trade_date else None,
+        "log_level": config.log_level,
     }
 
 
@@ -255,6 +262,7 @@ def execute_live(
     sleep: Callable[[float], None] = time.sleep,
 ) -> None:
     config = resolve_live_launch_config(args)
+    reporter.use_logger(JsonLineLogger(args.log_dir / "startup.jsonl", clock, config.log_level))
     print_and_confirm_launch("Live", live_launch_configuration(config))
     parameter_sets = load_parameter_sets(config.parameter_set_path, config.parameter_set_id)
     if len(parameter_sets) != 1:
@@ -264,7 +272,7 @@ def execute_live(
     database = Database(args.database)
     database.initialize()
     repositories = SqliteRepositories(database)
-    gateway = IbApiGateway(IbConfig.from_yaml(args.ib_config, config.ib_environment))
+    gateway = IbApiGateway(IbConfig.from_yaml(args.ib_config, config.ib_environment), TerminalMirrorLogger(reporter.logger))
     feed: LivePaperFeed | None = None
     context: RunContext | None = None
     state: RuntimeState | None = None
@@ -286,8 +294,10 @@ def execute_live(
             RunMode.LIVE_PAPER, None, started_at_et, threshold_update_rate=config.threshold_update_rate,
         )
         state = RuntimeState.empty(parameter_set, config.threshold)
-        logger = JsonLineLogger(args.log_dir / f"{run_id}.jsonl", clock)
+        logger = JsonLineLogger(args.log_dir / f"{run_id}.jsonl", clock, config.log_level)
         reporter.use_logger(logger)
+        run_logger = TerminalMirrorLogger(logger)
+        gateway.set_logger(run_logger)
         repositories.create(context)
         run_created = True
         reporter.info("run_created", f"RUN: created run_id={run_id}", run_id=run_id, symbol=context.symbol, trade_date=context.trade_date.isoformat(), parameter_set_id=parameter_set.parameter_set_id)
@@ -308,10 +318,17 @@ def execute_live(
         )
         assert session.session_start_et is not None
         wait_for_session_start(clock, session.session_start_et, reporter, sleep)
-        feed = LivePaperFeed(config.symbol, session, gateway, repositories, clock)
+        def heartbeat(fields: dict[str, object]) -> None:
+            print(
+                "HEARTBEAT "
+                f"run_id={run_id} processed_bar_count={state.processed_bar_count} "
+                + " ".join(f"{key}={value}" for key, value in fields.items())
+            )
+
+        feed = LivePaperFeed(config.symbol, session, gateway, repositories, clock, heartbeat)
         runner_started = True
-        summary = SingleDayRunner(database, repositories, clock, logger).execute_run(
-            context, feed, state, create_run=False,
+        summary = SingleDayRunner(database, repositories, clock, run_logger).execute_run(
+            context, feed, state, create_run=False, on_first_bar_confirmed=feed.mark_first_bar_confirmed,
         )
         print(json.dumps({
             "run_id": summary.run_id,

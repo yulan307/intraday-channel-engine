@@ -28,3 +28,6 @@ ib_environment: paper
 # Optional ET trading date in YYYY-MM-DD format.
 # null selects today, or the next tradable session after today's close.
 trade_date: null
+
+# INFO writes startup-through-first-bar diagnostics; ERROR writes only errors and final summaries.
+log_level: INFO

@@ -9,7 +9,7 @@ import pytest
 
 from single_day_test.bar_feed.live_paper_feed import LivePaperFeed
 from single_day_test.domain.enums import BarSource, FeedStatus
-from single_day_test.domain.errors import BarOrderingError
+from single_day_test.domain.errors import BarOrderingError, HistoricalDataError
 from single_day_test.domain.models import RawBar, TradingSession
 from single_day_test.ib.gateway import LiveBarCallbacks
 from single_day_test.persistence.database import Database, SqliteRepositories
@@ -33,6 +33,8 @@ class Gateway:
     def start_live_1m_bars(self, symbol: str, duration_seconds: int, callbacks: LiveBarCallbacks) -> Handle:
         self.duration, self.callbacks = duration_seconds, callbacks
         return self.handle
+
+    def is_connected(self) -> bool: return True
 
 
 def bar(index: int, volume: float = 1) -> RawBar:
@@ -116,3 +118,32 @@ def test_live_feed_uses_session_deadlines_when_runner_waits_without_timeout(tmp_
     clock.value = datetime(2025, 1, 2, 9, 35, tzinfo=ET)
     assert feed._wait_timeout(None) == 60.0
     assert feed._wait_timeout(2.5) == 2.5
+
+
+def test_live_feed_emits_heartbeat_only_after_first_bar_confirmation(tmp_path) -> None:
+    clock = Clock(datetime(2025, 1, 2, 9, 32, tzinfo=ET))
+    session = TradingSession(date(2025, 1, 2), True, datetime(2025, 1, 2, 9, 30, tzinfo=ET), datetime(2025, 1, 2, 16, 0, tzinfo=ET))
+    database = Database(tmp_path / "heartbeat.sqlite3"); database.initialize(); repos = SqliteRepositories(database)
+    heartbeats: list[dict[str, object]] = []
+    feed = LivePaperFeed("AAPL", session, Gateway(), repos, clock, heartbeats.append)
+
+    assert feed._heartbeat_fields_if_due() is None
+    feed.mark_first_bar_confirmed()
+    clock.value += timedelta(minutes=5)
+
+    heartbeat = feed._heartbeat_fields_if_due()
+    assert heartbeat is not None
+    assert heartbeat["ibapi_connected"] is True
+
+
+def test_live_feed_surfaces_gateway_error_to_runner(tmp_path) -> None:
+    clock = Clock(datetime(2025, 1, 2, 9, 32, tzinfo=ET))
+    session = TradingSession(date(2025, 1, 2), True, datetime(2025, 1, 2, 9, 30, tzinfo=ET), datetime(2025, 1, 2, 16, 0, tzinfo=ET))
+    database = Database(tmp_path / "gateway-error.sqlite3"); database.initialize(); repos = SqliteRepositories(database)
+    gateway = Gateway(); feed = LivePaperFeed("AAPL", session, gateway, repos, clock)
+    feed.start(); assert gateway.callbacks is not None
+
+    gateway.callbacks.error(HistoricalDataError("IBAPI error 162 for request 3: No market data"))
+
+    with pytest.raises(HistoricalDataError, match="IBAPI error 162"):
+        feed.next_event()

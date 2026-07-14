@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 from collections import deque
+from collections.abc import Callable
 from datetime import datetime, timedelta
 
 from ..domain.enums import BarSource, FeedStatus
@@ -18,7 +19,8 @@ class LivePaperFeed:
     """One keep-up-to-date historical request, exposed as ordered completed bars."""
 
     def __init__(self, symbol: str, session: TradingSession, gateway: IbGateway,
-                 raw_bars: RawBarRepository, clock: Clock) -> None:
+                 raw_bars: RawBarRepository, clock: Clock,
+                 heartbeat: Callable[[dict[str, object]], None] | None = None) -> None:
         if session.session_start_et is None or session.session_end_et is None:
             raise HistoricalDataError("Live session requires start and end timestamps")
         self.symbol, self.session, self.gateway, self.raw_bars, self.clock = symbol, session, gateway, raw_bars, clock
@@ -34,6 +36,8 @@ class LivePaperFeed:
         self._last_emitted: datetime | None = None
         self._error: Exception | None = None
         self._subscription: SubscriptionHandle | None = None
+        self._heartbeat = heartbeat
+        self._next_heartbeat_at: datetime | None = None
 
     def start(self) -> None:
         now = self.clock.now_et()
@@ -42,8 +46,18 @@ class LivePaperFeed:
         seconds = max(60, int((now - start).total_seconds()) + 10)
         self._subscription = self.gateway.start_live_1m_bars(
             self.symbol, seconds,
-            LiveBarCallbacks(self._on_historical, self._on_historical_end, self._on_update),
+            LiveBarCallbacks(self._on_historical, self._on_historical_end, self._on_update, self._on_error),
         )
+
+    def mark_first_bar_confirmed(self) -> None:
+        with self._condition:
+            self._next_heartbeat_at = self.clock.now_et() + timedelta(minutes=5)
+            self._condition.notify_all()
+
+    def _on_error(self, error: Exception) -> None:
+        with self._condition:
+            self._error = error
+            self._condition.notify_all()
 
     def _validate(self, bar: RawBar) -> None:
         start, end = self.session.session_start_et, self.session.session_end_et
@@ -162,6 +176,9 @@ class LivePaperFeed:
     def wait_for_change(self, timeout: float | None = None) -> None:
         with self._condition:
             self._condition.wait(self._wait_timeout(timeout))
+            heartbeat = self._heartbeat_fields_if_due()
+        if heartbeat is not None and self._heartbeat is not None:
+            self._heartbeat(heartbeat)
 
     def _wait_timeout(self, timeout: float | None) -> float | None:
         if timeout is not None:
@@ -170,7 +187,26 @@ class LivePaperFeed:
         assert end is not None
         now = self.clock.now_et()
         deadline = end if now < end else end + timedelta(seconds=60)
-        return max(0.0, (deadline - now).total_seconds())
+        wait_seconds = max(0.0, (deadline - now).total_seconds())
+        if self._next_heartbeat_at is not None:
+            wait_seconds = min(wait_seconds, max(0.0, (self._next_heartbeat_at - now).total_seconds()))
+        return wait_seconds
+
+    def _heartbeat_fields_if_due(self) -> dict[str, object] | None:
+        if self._next_heartbeat_at is None:
+            return None
+        now = self.clock.now_et()
+        if now < self._next_heartbeat_at:
+            return None
+        self._next_heartbeat_at = now + timedelta(minutes=5)
+        end = self.session.session_end_et
+        assert end is not None
+        return {
+            "now_et": now.isoformat(),
+            "ibapi_connected": self.gateway.is_connected() if hasattr(self.gateway, "is_connected") else None,
+            "last_bar_timestamp": self._last_emitted.isoformat() if self._last_emitted else None,
+            "waiting_for": "next_completed_bar" if now < end else "final_completed_bar",
+        }
 
     def close(self) -> None:
         with self._condition:
