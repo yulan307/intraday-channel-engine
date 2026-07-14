@@ -40,14 +40,17 @@ passes `SystemClock` and tests pass a fake clock.
 `configs/live_config.yaml` is the default Live launch configuration. It holds
 the symbol, direction, threshold, parameter selection, IB environment,
 optional `threshold_update_rate`, and optional `trade_date`. The rate is a
-0-100 YAML percentage (null or omitted is 0) applied only to Auto signal
-updates: BUY subtracts it and SELL adds it to the signal price. All matching CLI options are optional and override
+0-100 YAML percentage. With a numeric threshold, a numeric rate (including 0)
+enables Auto and uses that threshold as the initial value; null or omission
+keeps Fixed mode. Auto signal updates subtract it for BUY and add it for SELL.
+All matching CLI options are optional and override
 only the corresponding YAML value when explicitly supplied. `trade_date` is
 the YAML/CLI name for the prior Live start-date selection.
 
 Before any runtime directory, SQLite, TWS, or data-request operation, both
 CLI entrypoints print their validated merged launch configuration and require
-the operator to press Enter.
+the operator to press Enter; the payload explicitly reports
+`auto_threshold_enabled`.
 
 Input validation is handled at the CLI boundary as a normal exit: one concise
 `ERROR:` console line, one `input_validation_error` JSONL event, exit code 2,

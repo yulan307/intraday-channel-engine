@@ -38,9 +38,12 @@ def test_yaml_launch_defaults_and_cli_overrides(tmp_path: Path) -> None:
     assert configured.direction is Direction.BUY
     assert configured.trade_date == date(2026, 7, 15)
     assert configured.threshold_update_rate == 0.0
+    assert configured.threshold_mode is ThresholdMode.FIXED
+    assert live_launch_configuration(configured)["auto_threshold_enabled"] is False
     assert overridden.symbol == "MSFT"
     assert overridden.direction is Direction.SELL
     assert overridden.threshold == 150.0
+    assert overridden.threshold_mode is ThresholdMode.FIXED
     assert overridden.ib_environment == "live"
     assert overridden.trade_date == date(2026, 7, 16)
 
@@ -65,6 +68,7 @@ def test_live_config_allows_null_threshold_as_auto_mode(tmp_path: Path) -> None:
     assert configured.threshold is None
     assert configured.threshold_update_rate == 12.5
     assert live_launch_configuration(configured)["threshold_mode"] is ThresholdMode.AUTO.value
+    assert live_launch_configuration(configured)["auto_threshold_enabled"] is True
     assert live_launch_configuration(configured)["threshold_update_rate"] == 12.5
 
 
@@ -75,7 +79,23 @@ def test_live_config_allows_null_threshold_update_rate_as_zero(tmp_path: Path) -
         encoding="utf-8",
     )
 
-    assert resolve_live_launch_config(args(path)).threshold_update_rate == 0.0
+    configured = resolve_live_launch_config(args(path))
+    assert configured.threshold_update_rate == 0.0
+    assert configured.threshold_mode is ThresholdMode.AUTO
+
+
+def test_live_config_uses_numeric_threshold_as_auto_initial_value_when_rate_is_supplied(tmp_path: Path) -> None:
+    path = tmp_path / "live.yaml"
+    path.write_text(
+        "symbol: AAPL\ndirection: BUY\nthreshold: 100\nthreshold_update_rate: 0\nparameter_set_path: params.csv\nparameter_set_id: p1\nib_environment: paper\n",
+        encoding="utf-8",
+    )
+
+    configured = resolve_live_launch_config(args(path))
+
+    assert configured.threshold_mode is ThresholdMode.AUTO
+    assert configured.threshold == 100.0
+    assert live_launch_configuration(configured)["auto_threshold_enabled"] is True
 
 
 @pytest.mark.parametrize("rate", ("", -1, 100.1, True, "not-a-number", ".nan"))

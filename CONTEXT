@@ -33,8 +33,11 @@ Implemented scope:
 - Fixed Threshold remains unchanged. Auto Threshold resets every date,
   initializes from the first completed Bar's raw `open`, and updates after
   triggered BUY or SELL for the next Bar. `threshold_update_rate` is a 0-100
-  percent YAML value (null or omitted means 0): BUY applies `1 - rate/100` and
-  SELL applies `1 + rate/100` to the signal price. A signal-driven
+  percent YAML value. With a numeric threshold, a numeric rate (including 0)
+  enables Auto and makes that threshold the initial active threshold; null or
+  omitted rate keeps Fixed mode. A null threshold remains Auto and initializes
+  from the first Bar open. BUY applies `1 - rate/100` and SELL applies
+  `1 + rate/100` to the signal price. A signal-driven
   Auto Threshold update resets Trend and Channel state for that next Bar; the
   signal Bar retains its pre-reset calculations.
 - `single_day_run` records `threshold_update_rate`; it and daily `run_summary`
@@ -87,7 +90,8 @@ existing current-or-next-tradable-session selection.
 
 Both CLIs print the validated merged launch configuration and wait for Enter
 before creating runtime directories, opening SQLite, connecting TWS, or
-requesting data. Live CLI input validation is an expected error exit: it prints one `ERROR:`
+requesting data. The printed configuration explicitly includes
+`auto_threshold_enabled`. Live CLI input validation is an expected error exit: it prints one `ERROR:`
 line, logs `input_validation_error` to `startup.jsonl` before a run ID exists
 (or the run JSONL log afterward), and exits with code 2 without a traceback.
 After session resolution it logs and prints requested/selected dates and the

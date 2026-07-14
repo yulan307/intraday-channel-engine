@@ -170,10 +170,12 @@ Separate `initial_threshold` and `active_threshold` request fields are not
 part of this input contract. `active_threshold` is runtime state, and the
 resolved Auto initial threshold is the first completed Bar raw `open`.
 
-`threshold_update_rate` is an optional 0-100 percentage. Null or omission
-means `0`, preserving the signal-price update. It applies only after a
-triggered Auto signal: BUY uses `price × (1 - rate / 100)` and SELL uses
-`price × (1 + rate / 100)`.
+`threshold_update_rate` is an optional 0-100 percentage. With a numeric
+threshold, a numeric rate (including `0`) selects Auto and uses that threshold
+as the initial active threshold; null or omission selects Fixed mode. A null
+threshold remains Auto and initializes from the first Bar raw `open`. The rate
+applies after a triggered Auto signal: BUY uses `price × (1 - rate / 100)` and
+SELL uses `price × (1 + rate / 100)`.
 
 ## 6. Run ID and Daily Result Rules
 
@@ -218,11 +220,12 @@ The existing database is not migrated or retained.
 
 ## 7. Threshold Modes
 
-Threshold mode is determined by whether the request contains a threshold.
+Threshold mode is determined by the threshold and whether a numeric update rate
+was explicitly supplied.
 
 ### 7.1 Fixed Threshold
 
-When a threshold is provided:
+When a numeric threshold is provided without a numeric update rate:
 
 ```text
 threshold_mode = FIXED
@@ -239,7 +242,8 @@ BUY or SELL signal
 
 ### 7.2 Auto Threshold
 
-When the threshold is absent or explicitly `null`:
+When the threshold is absent or explicitly `null`, or when a numeric threshold
+has a numeric update rate:
 
 ```text
 threshold_mode = AUTO
@@ -248,11 +252,14 @@ threshold_mode = AUTO
 Auto Threshold is valid for backtest and Live Paper execution. The threshold
 is reset at the start of every trade date.
 
-For each date:
+For each date without a configured numeric threshold:
 
 ```text
 active_threshold = None
 ```
+
+For numeric-threshold Auto runs, `active_threshold` starts at the configured
+threshold instead.
 
 The first threshold is set from the raw `open` of the first completed Bar. After a
 BUY or SELL signal is triggered, the signal price becomes the threshold for
@@ -373,7 +380,7 @@ scope.
 - Auto mode updates its threshold only after a triggered BUY or SELL and
   applies the direction-adjusted value from the following Bar.
 - `threshold_update_rate` must be finite and in `[0, 100]`; missing or null
-  resolves to `0`.
+  is not supplied for numeric-threshold Auto selection.
 - No state is shared between parameter sets or trade dates.
 - The YAML must contain exactly one `symbol`.
 - At least one of `trade_date_start` and `trade_date_end` must be provided.
@@ -413,6 +420,7 @@ scope.
 | E3-009 | Auto initial threshold is the first completed Bar raw open. | Accepted |
 | E3-010 | A triggered BUY or SELL updates the threshold for the following Bars of the same date. | Accepted |
 | E3-025 | `threshold_update_rate` adjusts Auto signal updates: BUY subtracts and SELL adds the configured percentage. | Accepted |
+| E3-026 | A numeric threshold plus any numeric update rate, including zero, selects Auto and uses the threshold as its initial value. | Accepted |
 | E3-011 | Trend, Channel, Decision, BarFeed, and common data-processing behavior remain unchanged. | Accepted |
 | E3-012 | Parameter CSV rows use `is_active`; value `1` selects rows for the default scan. | Accepted |
 | E3-013 | A provided `parameter_set_id` selects only that row and overrides `is_active`. | Accepted |

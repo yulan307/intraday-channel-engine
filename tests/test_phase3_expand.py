@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from single_day_test.application.backtest_cli import BacktestScanner, resolve_backtest_launch_config
+from single_day_test.application.backtest_cli import BacktestScanner, backtest_launch_configuration, resolve_backtest_launch_config
 from single_day_test.application.bar_processor import process_bar
 from single_day_test.bar_feed.base import FeedEvent
 from single_day_test.domain.enums import BarSource, DecisionLabel, Direction, FeedStatus, RunMode, RunStatus, ThresholdMode
@@ -53,6 +53,20 @@ def test_auto_threshold_uses_first_completed_bar_open() -> None:
         records.append(transition.record)
         state = transition.next_state_after_persist
     assert [record.active_threshold for record in records] == [90.0, 90.0, 90.0]
+
+
+def test_auto_with_configured_threshold_uses_that_initial_value() -> None:
+    params = _params()
+    context = RunContext(
+        "run-1", "AAPL", date(2025, 1, 2), params, Direction.BUY,
+        ThresholdMode.AUTO, 110.0, RunMode.BACKTEST, None, datetime(2025, 1, 2, 9, 0, tzinfo=ET),
+    )
+    transition = process_bar(
+        context, _bar(0, 100.0, 90.0), RuntimeState.empty(params, context.fixed_threshold),
+        TrendEngine(), ChannelEngine(), DecisionEngine(),
+    )
+
+    assert transition.record.active_threshold == 110.0
 
 
 class _SignalTrendEngine:
@@ -175,9 +189,10 @@ def test_yaml_backtest_config_applies_defaults_and_cli_overrides(tmp_path: Path)
     )
     configured = resolve_backtest_launch_config(_backtest_args(path), date(2025, 1, 3))
     assert configured.request.symbol == "AAPL"
-    assert configured.request.threshold_mode is ThresholdMode.FIXED
+    assert configured.request.threshold_mode is ThresholdMode.AUTO
     assert configured.request.fixed_threshold == 0.0
     assert configured.request.threshold_update_rate == 12.5
+    assert backtest_launch_configuration(configured)["auto_threshold_enabled"] is True
     assert configured.request.trade_dates == (date(2025, 1, 2), date(2025, 1, 3))
     assert configured.parameter_set_id == ""
     overridden = resolve_backtest_launch_config(
@@ -192,6 +207,7 @@ def test_yaml_backtest_config_applies_defaults_and_cli_overrides(tmp_path: Path)
     assert overridden.request.symbol == "MSFT"
     assert overridden.request.direction is Direction.BUY
     assert overridden.request.fixed_threshold == 150.0
+    assert overridden.request.threshold_mode is ThresholdMode.AUTO
     assert overridden.request.threshold_update_rate == 12.5
     assert overridden.parameter_set_path == Path("other.csv")
     assert overridden.parameter_set_id == "p1"
@@ -201,7 +217,10 @@ def test_yaml_backtest_config_applies_defaults_and_cli_overrides(tmp_path: Path)
     assert overridden.ib_config == Path("other-ib.yaml")
 
     path.write_text(path.read_text(encoding="utf-8").replace("threshold_update_rate: 12.5", "threshold_update_rate:"), encoding="utf-8")
-    assert resolve_backtest_launch_config(_backtest_args(path), date(2025, 1, 3)).request.threshold_update_rate == 0.0
+    without_rate = resolve_backtest_launch_config(_backtest_args(path), date(2025, 1, 3))
+    assert without_rate.request.threshold_update_rate == 0.0
+    assert without_rate.request.threshold_mode is ThresholdMode.FIXED
+    assert backtest_launch_configuration(without_rate)["auto_threshold_enabled"] is False
 
 
 def test_yaml_backtest_config_rejects_unknown_or_invalid_values(tmp_path: Path) -> None:

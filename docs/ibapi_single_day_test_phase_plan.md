@@ -492,12 +492,13 @@ Phase 3 Expand adds an outer parameter-set scan and an inner inclusive
 multi-date backtest. The parameter CSV has `is_active`; an empty requested ID
 selects every row with `is_active = 1`, while an explicit ID selects one row.
 The request uses `trade_date_start` / `trade_date_end`, one `threshold`, and
-an optional `threshold_update_rate`.
-Numeric values are Fixed; omitted or null is Auto. Auto Threshold resets each
+an optional `threshold_update_rate`. A numeric threshold plus any numeric rate,
+including zero, selects Auto and uses the threshold as its initial value; a
+null/omitted rate keeps Fixed mode. A null threshold is Auto regardless of the
+rate. Auto Threshold resets each
 date, initializes from the first completed Bar raw `open`, and updates after
 triggered BUY or SELL for the following Bar using the configured 0-100 percent
-rate: BUY subtracts it and SELL adds it to the signal price; null or omitted
-rate is 0. That signal-driven update
+rate: BUY subtracts it and SELL adds it to the signal price. That signal-driven update
 resets Trend and Channel state for the following Bar, but not for the signal
 Bar itself. The persisted `processed_1m_bar.decision` is null without a
 triggered signal and is `BUY` or `SELL` when one triggers.

@@ -12,8 +12,10 @@ direction: BUY
 # A number selects Fixed Threshold; null selects Auto Threshold.
 threshold: null
 
-# Auto signal updates: 0-100 percent. Null or omitted uses 0 (the signal price).
-threshold_update_rate: 0
+# Auto signal updates: 0-100 percent. With a numeric threshold, a numeric rate
+# enables Auto mode; null or omission keeps Fixed mode. Auto without a threshold
+# remains enabled. A numeric 0 preserves signal-price updates.
+threshold_update_rate: null
 
 # An empty parameter_set_id scans every parameter CSV row with is_active = 1.
 # A non-empty ID selects exactly that row, even when it is inactive.

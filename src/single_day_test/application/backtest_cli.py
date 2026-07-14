@@ -29,7 +29,7 @@ from ..support.ids import DefaultIdGenerator, IdGenerator
 from .single_day_runner import SingleDayRunner
 from .startup_confirmation import print_and_confirm_launch
 from .summary_service import build_failed_summary, build_skipped_summary
-from .threshold_policy import parse_threshold_update_rate
+from .threshold_policy import parse_threshold_update_rate, resolve_config_threshold_mode
 
 
 DEFAULT_BACKTEST_CONFIG = Path("configs/backtest.yaml")
@@ -193,7 +193,8 @@ def resolve_backtest_launch_config(args: argparse.Namespace, today_et: date) -> 
     ib_environment = selected("ib_environment")
     database = selected("database")
     ib_config = selected("ib_config")
-    threshold_update_rate = parse_threshold_update_rate(values.get("threshold_update_rate"))
+    threshold_update_rate_raw = values.get("threshold_update_rate")
+    threshold_update_rate = parse_threshold_update_rate(threshold_update_rate_raw)
     if not isinstance(symbol, str) or not symbol.strip():
         raise InputValidationError("symbol is required")
     if not isinstance(direction, str):
@@ -205,11 +206,12 @@ def resolve_backtest_launch_config(args: argparse.Namespace, today_et: date) -> 
     if threshold == "":
         raise InputValidationError("threshold must be numeric, null, or omitted; empty string is invalid")
     if threshold is None:
-        threshold_mode, fixed_threshold = ThresholdMode.AUTO, None
+        fixed_threshold = None
     elif isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
         raise InputValidationError("threshold must be numeric, null, or omitted")
     else:
-        threshold_mode, fixed_threshold = ThresholdMode.FIXED, float(threshold)
+        fixed_threshold = float(threshold)
+    threshold_mode = resolve_config_threshold_mode(fixed_threshold, threshold_update_rate_raw is not None)
     if not isinstance(parameter_set_path, (str, Path)) or not str(parameter_set_path):
         raise InputValidationError("parameter_set_path is required")
     if parameter_set_id is not None and not isinstance(parameter_set_id, str):
@@ -237,6 +239,7 @@ def backtest_launch_configuration(config: BacktestLaunchConfig) -> dict[str, obj
         "direction": config.request.direction.value,
         "threshold": config.request.fixed_threshold,
         "threshold_mode": config.request.threshold_mode.value,
+        "auto_threshold_enabled": config.request.threshold_mode is ThresholdMode.AUTO,
         "threshold_update_rate": config.request.threshold_update_rate,
         "parameter_set_path": str(config.parameter_set_path),
         "parameter_set_id": config.parameter_set_id,
