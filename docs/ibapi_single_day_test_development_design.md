@@ -709,20 +709,31 @@ trade_date == current ET date
 
 ---
 
-## Phase 3 Expand Current-State Override
+## Phase 3 Expand Current State
 
-The implemented Backtest flow scans selected parameter sets over an inclusive
-date range. One generated `run_id` spans every date for one parameter set;
-daily records use `(run_id, trade_date)`. Auto Threshold is application state:
-it initializes from the first completed Bar raw `open`, and updates for
-the Bar after a triggered BUY or SELL. `threshold_update_rate` is a 0-100
-percentage: a numeric threshold plus a numeric rate enables Auto and uses the
-threshold as initial state; null or omitted rate keeps that threshold Fixed.
-BUY subtracts the rate and SELL adds it to the signal price. A signal-driven update resets Trend and
-Channel state for that following Bar, while the signal Bar retains its existing
-calculation. `processed_1m_bar.decision` persists null for no action and only
-`BUY` or `SELL` for triggered signals. `docs/phase3_expand.md` is authoritative
-for the current request contract and persistence rules.
+Phase 3 Expand is implemented. The YAML-first Backtest CLI is the sole
+backtest entry point; explicit CLI options override only matching YAML fields.
+It scans selected `is_active = 1` parameter rows, or one explicitly requested
+`parameter_set_id`, across an inclusive date range. One generated `run_id`
+spans all dates for one parameter set. Daily `single_day_run` and
+`run_summary` records use `(run_id, trade_date)` keys; non-trading dates are
+`SKIPPED`, failures are `FAILED`, later dates continue, and one CSV is exported
+for the run. Incompatible SQLite schemas are rebuilt as `phase3_expand_v3`
+without retaining old data.
+
+Fixed Threshold remains unchanged. Auto Threshold resets every date,
+initializes from the first completed Bar raw `open`, and updates after a
+triggered BUY or SELL for the following Bar. A numeric threshold plus an
+explicit numeric `threshold_update_rate` from 0 through 100 selects Auto and
+uses that threshold as the initial value; a null or omitted rate keeps a
+numeric threshold Fixed. BUY applies `1 - rate / 100` and SELL applies
+`1 + rate / 100` to the signal price. A signal-driven update resets Trend and
+Channel state for the following Bar, while the signal Bar retains its existing
+calculation. `processed_1m_bar.decision` is null without a triggered signal
+and is `BUY` or `SELL` when one triggers. A null threshold remains Auto and
+initializes from the first completed Bar raw `open` in both Backtest and Live
+Paper. Startup confirmation reports the resolved `auto_threshold_enabled`
+value before runtime side effects.
 
 ## 10. BarFeed 接口
 
@@ -890,7 +901,7 @@ BacktestFeed 不输出长期 `BAR_WAITING`。
 ## 12. LivePaperFeed
 
 > 本节早期 LivePaperFeed 设计已由文末的
-> `Phase 4 Current-State Override (2026-07-14)` 覆盖；实施以该 override 为准。
+> Earlier Phase 4 text is superseded by the current-state section below.
 
 文件：
 
@@ -2394,7 +2405,7 @@ active_threshold 日内更新
 
 ---
 
-## Phase 4 Current-State Override (2026-07-14)
+## Phase 4 Current State (2026-07-14)
 
 This section supersedes earlier Phase 4 design text in this document.
 
@@ -2496,23 +2507,29 @@ bars and logs them; the feed has already written `raw_1m_bar` before exposure.
 Unit tests use a fake clock and fake
 callbacks; connected TWS tests use real time and verify raw rows and logs.
 
-## Phase 5 Current-State Override (2026-07-14)
+## Phase 5 Current State (2026-07-14)
 
-Phase 5 consumes the Phase 4 `CompletedBar` interface without adding a TWS API
-path. The Live CLI loads one selected parameter set, creates a `LIVE_PAPER`
-run before any pre-market wait, and passes `LivePaperFeed` to
-`SingleDayRunner`. `live_phase` is null. `HIST`, `LIVE`, and `END` Bars use the
-same strategy pipeline and may persist signals; Phase 4 continues to write
+Phase 5 is implemented. The Live CLI is YAML-first, loads one selected
+parameter set, creates a `LIVE_PAPER` run before any pre-market wait, and
+passes `LivePaperFeed` to `SingleDayRunner` without adding a new TWS API path.
+`live_phase` remains null. `HIST`, `LIVE`, and `END` Bars use the same
+strategy pipeline and may persist signals; Phase 4 continues to write
 `raw_1m_bar` before the Runner receives each Bar.
 
-The Runner uses an injected Clock, waits through `feed.wait_for_change()` on
+The Runner uses one injected `Clock`, waits through `feed.wait_for_change()` on
 empty output, and commits one processed Bar plus any signal before advancing
-runtime state. `LivePaperFeed` computes the unbounded wait deadline from the
-session end and final-bar timeout. Completed and failed terminal records write
-the run status and summary atomically. Live runs write structured JSONL audit
-events to `data/logs/<run_id>.jsonl` by default. Startup YAML requires
-`log_level: INFO | ERROR`; INFO detail ends after the first persisted Bar while
-errors and terminal summaries remain. Every IBAPI error callback is recorded
-with callback context, matching live-request errors fail the feed, and Live
-prints a five-minute terminal heartbeat after the first confirmed Bar. There is no order, retry,
-recovery, checkpoint, or automated real-TWS test in this Phase.
+runtime state. `LivePaperFeed` owns deadline-aware waiting from the session end
+and final-Bar timeout. Completed and failed terminal records write run status
+and summary atomically. Live runs write structured JSONL audit events to
+`data/logs/<run_id>.jsonl` by default. Both startup YAML files require
+`log_level: INFO | ERROR`; INFO detail ends after the first successfully
+persisted Bar while errors and terminal summaries remain. Input validation is
+an expected exit with one `ERROR:` line, an `input_validation_error` JSONL
+event, exit code 2, and no traceback. Session selection and pre-market waiting
+status are emitted to console and JSONL. Every IBAPI error callback is recorded
+with its callback context, matching live-request errors fail the feed, and
+Live prints a five-minute terminal heartbeat after the first confirmed Bar.
+Late or duplicate completed Bars after emission are logged with their complete
+raw data and ordering context, skipped, and do not terminate the run. There
+is no order, retry, recovery, checkpoint, ranking, scan summary, or automated
+real-TWS test in this Phase.

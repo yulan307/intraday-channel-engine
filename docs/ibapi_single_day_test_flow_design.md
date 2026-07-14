@@ -309,13 +309,20 @@ flowchart TD
 
 ---
 
-## Phase 3 Expand Current-State Override
+## Phase 3 Expand Current State
 
-Backtest now loops selected parameter sets and selected calendar dates. Each
-parameter set receives one generated `run_id`; `SKIPPED` non-trading days and
-`FAILED` days do not stop later dates. One CSV is exported after all dates.
-Auto Threshold is resolved before Decision evaluation and remains null during
-warm-up. `docs/phase3_expand.md` defines the current authoritative flow.
+Backtest now uses the YAML-first CLI to loop selected parameter sets and
+inclusive calendar dates. Each parameter set receives one generated `run_id`;
+daily records use `(run_id, trade_date)`, `SKIPPED` non-trading days and
+`FAILED` days do not stop later dates, and one multi-day CSV is exported after
+all dates. The current SQLite schema is `phase3_expand_v3` and incompatible
+tables are rebuilt without migration. Auto Threshold resets each date,
+initializes from the first completed Bar raw `open`, and applies
+signal-driven updates to the following Bar. Numeric thresholds with an
+explicit numeric update rate, including zero, select Auto; null or omitted
+rates keep numeric thresholds Fixed. A null threshold remains Auto and
+initializes from the first completed Bar raw `open` in both Backtest and Live
+Paper.
 
 ## 7. `1m_bar_prepare` 模块
 
@@ -412,7 +419,7 @@ low <= close
 ## 9. Live Paper Bar 准备
 
 > 本节早期 Live Paper flow 已由文末的
-> `Phase 4 Current-State Override (2026-07-14)` 覆盖；实施以该 override 为准。
+> Earlier Phase 4 text is superseded by the current-state section below.
 
 ### 9.1 盘前启动
 
@@ -1528,7 +1535,7 @@ flowchart TD
 
 ---
 
-## Phase 4 Current-State Override (2026-07-14)
+## Phase 4 Current State (2026-07-14)
 
 本节覆盖本文件之前的 Phase 4 Live Paper flow。
 
@@ -1600,10 +1607,11 @@ END Bar 也先以 AVAILABLE 被取出，下一次才是 `END`。未收盘且 out
 `WAITING`，consumer 调用 `wait_for_change()`。
 
 收盘后最后 Bar 缺失最多等待 60 秒，之后抛错退出。已输出 timestamp 的重复 Bar
-或晚于输出顺序的旧 Bar 也直接抛错。所有预期外错误直接终止；无论成功或失败，
-fetch 模组均在 `finally` 取消请求。
+或晚于输出顺序的旧 Bar 会记录完整 raw Bar、原因和最后输出 timestamp，随后跳过；
+同一批次后续有效 Bar 继续处理。其他预期外错误直接终止；无论成功或失败，fetch
+模组均在 `finally` 取消请求。
 
-## Phase 5 Current-State Override (2026-07-14)
+## Phase 5 Current State (2026-07-14)
 
 Live CLI 在 Session 解析成功后、盘前等待前创建 `single_day_run`，并在等待结束后把
 `LivePaperFeed` 交给 `SingleDayRunner`：
@@ -1616,5 +1624,5 @@ LivePaperFeed -> CompletedBar -> process_bar -> processed_1m_bar/signal_event
 `HIST`、`LIVE`、`END` 都进入同一算法链；Phase 4 仍在输出前写入 `raw_1m_bar`。
 Runner 的 `WAITING` 调用无参 `wait_for_change()`；Feed 负责在新 callback、错误、关闭、
 收盘或收盘后 60 秒最终 Bar deadline 时唤醒。每个 run 默认写入
-`data/logs/<run_id>.jsonl`。启动 YAML 的 `log_level` 必须为 `INFO` 或 `ERROR`：INFO 仅记录至首根成功持久化 Bar（含 IBAPI 请求/回调与策略结果），之后正常处理静默；两种等级都保留 IBAPI error 回调和终态。首根 Bar 后 Live 每五分钟仅在终端输出心跳。无订单、重试、恢复或
+`data/logs/<run_id>.jsonl`。启动 YAML 的 `log_level` 必须为 `INFO` 或 `ERROR`：INFO 仅记录至首根成功持久化 Bar（含 IBAPI 请求/回调与策略结果），之后正常处理静默；两种等级都保留 IBAPI error 回调和终态。输入校验以 exit code 2 正常退出并写入 `input_validation_error`，不输出 traceback；Session 选择和盘前等待也记录到 console/JSONL。首根 Bar 后 Live 每五分钟仅在终端输出心跳。晚到或重复 Bar 会记录并跳过。无订单、重试、恢复或
 checkpoint；真实 TWS 全天验收由用户最后执行。
