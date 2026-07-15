@@ -14,11 +14,12 @@ from single_day_test.domain.enums import BarSource, DecisionLabel, Direction, Fe
 from single_day_test.domain.errors import InputValidationError, NonTradingDayError
 from single_day_test.domain.models import ChannelBar, ChannelResult, CompletedBar, RawBar, RunContext, TrendBar, TrendResult
 from single_day_test.domain.parameters import ParameterSet
-from single_day_test.domain.states import ChannelState, RuntimeState, TrendState
+from single_day_test.domain.states import ChannelState, DailyRunStatistics, RuntimeState, TrendState
 from single_day_test.engine.channel_engine import ChannelEngine
 from single_day_test.engine.decision_engine import DecisionEngine
 from single_day_test.engine.trend_engine import TrendEngine
 from single_day_test.persistence.database import Database, SqliteRepositories
+from single_day_test.application.summary_service import build_completed_summary
 
 
 ET = ZoneInfo("America/New_York")
@@ -67,6 +68,25 @@ def test_auto_with_configured_threshold_uses_that_initial_value() -> None:
     )
 
     assert transition.record.active_threshold == 110.0
+
+
+@pytest.mark.parametrize(
+    ("direction", "best_price", "best_order_price"),
+    [(Direction.BUY, 90.0, 95.0), (Direction.SELL, 110.0, 105.0)],
+)
+def test_runtime_statistics_builds_normalized_best_reward(
+    direction: Direction, best_price: float, best_order_price: float,
+) -> None:
+    context = RunContext("run-1", "AAPL", date(2025, 1, 2), _params(), direction, ThresholdMode.FIXED, 100.0, RunMode.BACKTEST, None, datetime(2025, 1, 2, 9, 0, tzinfo=ET))
+    state = RuntimeState.empty(context.parameter_set, 100.0)
+    state.processed_bar_count = 2
+    state.statistics = DailyRunStatistics(100.0, best_price, best_order_price, 2)
+
+    summary = build_completed_summary(context, state, datetime(2025, 1, 2, 16, 0, tzinfo=ET))
+
+    assert summary.best_reward == pytest.approx(1 - abs(best_order_price - best_price) / abs(best_order_price + best_price))
+    assert 0 <= summary.best_reward <= 1
+    assert summary.efficiency == pytest.approx(summary.best_reward / 2)
 
 
 class _SignalTrendEngine:
@@ -345,6 +365,6 @@ def test_failed_day_keeps_partial_processed_rows_in_final_csv(tmp_path) -> None:
     scanner.execute(request, [_params()])
     status = database.connection.execute("SELECT status FROM single_day_run WHERE run_id='run-p1'").fetchone()[0]
     rows = database.connection.execute("SELECT COUNT(*) FROM processed_1m_bar WHERE run_id='run-p1'").fetchone()[0]
-    assert status == "FAILED" and rows == 2
+    assert status == "FAILED" and rows == 0
     assert database.connection.execute("SELECT status FROM run_summary WHERE run_id='run-p1'").fetchone()[0] == "FAILED"
     assert sum(1 for _ in (tmp_path / "data" / "run-p1.csv").open(encoding="utf-8")) == 3

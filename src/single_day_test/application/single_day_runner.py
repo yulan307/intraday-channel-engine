@@ -6,7 +6,7 @@ from datetime import timedelta
 
 from ..bar_feed.base import BarFeed
 from ..domain.enums import BarSource, FeedStatus, RunMode
-from ..domain.models import CompletedBar, RunContext, RunSummary, TradingSession
+from ..domain.models import CompletedBar, ProcessedBarRecord, RunContext, RunSummary, TradingSession
 from ..domain.states import RuntimeState
 from ..engine.channel_engine import ChannelEngine
 from ..engine.decision_engine import DecisionEngine
@@ -64,6 +64,7 @@ class SingleDayRunner:
         *,
         create_run: bool = True,
         write_run_summary: bool = True,
+        processed_record_collector: Callable[[ProcessedBarRecord], None] | None = None,
         on_first_bar_confirmed: Callable[[], None] | None = None,
         session: TradingSession | None = None,
         order_submitter: LiveOrderSubmitter | None = None,
@@ -116,21 +117,43 @@ class SingleDayRunner:
                             self._error("order_submission_failed", run_id=context.run_id, error_type=type(exc).__name__, error_message=str(exc))
                             continue
 
-                    try:
-                        with self.database.transaction():
-                            self.repositories.insert(transition.record)
-                            if transition.signal_event:
-                                self.repositories.insert(transition.signal_event)
-                    except Exception as exc:
-                        self._raise_before_first_bar(state, exc)
-                        self._error(
-                            "bar_persistence_failed", run_id=context.run_id,
-                            timestamp=bar.raw.timestamp_et.isoformat(), order_submitted=order_submitted,
-                            error_type=type(exc).__name__, error_message=str(exc),
-                        )
-                        if order_submitted:
-                            state = transition.next_state_after_persist
-                        continue
+                    if context.mode is RunMode.BACKTEST:
+                        if processed_record_collector is None:
+                            raise RuntimeError("Backtest requires an in-memory processed-record collector")
+                        try:
+                            processed_record_collector(transition.record)
+                        except Exception as exc:
+                            self._raise_before_first_bar(state, exc)
+                            self._error(
+                                "backtest_csv_collection_failed", run_id=context.run_id,
+                                timestamp=bar.raw.timestamp_et.isoformat(), error_type=type(exc).__name__, error_message=str(exc),
+                            )
+                            continue
+                        if transition.signal_event:
+                            try:
+                                with self.database.transaction():
+                                    self.repositories.insert(transition.signal_event)
+                            except Exception as exc:
+                                self._error(
+                                    "backtest_signal_persistence_failed", run_id=context.run_id,
+                                    timestamp=bar.raw.timestamp_et.isoformat(), error_type=type(exc).__name__, error_message=str(exc),
+                                )
+                    else:
+                        try:
+                            with self.database.transaction():
+                                self.repositories.insert(transition.record)
+                                if transition.signal_event:
+                                    self.repositories.insert(transition.signal_event)
+                        except Exception as exc:
+                            self._raise_before_first_bar(state, exc)
+                            self._error(
+                                "bar_persistence_failed", run_id=context.run_id,
+                                timestamp=bar.raw.timestamp_et.isoformat(), order_submitted=order_submitted,
+                                error_type=type(exc).__name__, error_message=str(exc),
+                            )
+                            if order_submitted:
+                                state = transition.next_state_after_persist
+                            continue
 
                     state = transition.next_state_after_persist
                     self._info(

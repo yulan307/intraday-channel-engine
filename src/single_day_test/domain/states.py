@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from collections import deque
 
 from .models import TrendBar, ChannelBar, SignalEvent
-from .enums import TrendLabel
+from .enums import Direction, TrendLabel
 from .parameters import ParameterSet
 
 
@@ -47,6 +47,24 @@ class DecisionState:
     break_count: int = 0
 
 
+@dataclass(frozen=True)
+class DailyRunStatistics:
+    first_threshold: float | None = None
+    best_price: float | None = None
+    best_order_price: float | None = None
+    signal_count: int = 0
+
+    def record(self, active_threshold: float | None, trend_price: float, signal_price: float | None, direction: Direction) -> DailyRunStatistics:
+        first_threshold = self.first_threshold if self.first_threshold is not None else active_threshold
+        if direction is Direction.BUY:
+            best_price = trend_price if self.best_price is None else min(self.best_price, trend_price)
+            best_order_price = self.best_order_price if signal_price is None else (signal_price if self.best_order_price is None else min(self.best_order_price, signal_price))
+        else:
+            best_price = trend_price if self.best_price is None else max(self.best_price, trend_price)
+            best_order_price = self.best_order_price if signal_price is None else (signal_price if self.best_order_price is None else max(self.best_order_price, signal_price))
+        return DailyRunStatistics(first_threshold, best_price, best_order_price, self.signal_count + int(signal_price is not None))
+
+
 @dataclass
 class RuntimeState:
     trend: TrendState
@@ -56,6 +74,7 @@ class RuntimeState:
     decision_complete: bool = True
     processed_bar_count: int = 0
     signal_events: list[SignalEvent] = field(default_factory=list)
+    statistics: DailyRunStatistics = field(default_factory=DailyRunStatistics)
 
     @classmethod
     def empty(cls, params: ParameterSet, active_threshold: float | None = None) -> RuntimeState:
@@ -67,4 +86,5 @@ class RuntimeState:
             decision_complete=True,
             processed_bar_count=0,
             signal_events=[],
+            statistics=DailyRunStatistics(),
         )

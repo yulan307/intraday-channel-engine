@@ -316,7 +316,7 @@ inclusive calendar dates. Each parameter set receives one generated `run_id`;
 daily `single_day_run` records use `(run_id, trade_date)`, while scan-level
 `run_summary` records use `run_id`. `SKIPPED` non-trading days and `FAILED`
 days do not stop later dates, and one multi-day CSV is exported after all dates.
-The current SQLite schema is `backtest_run_statistics_v2` and incompatible
+The current SQLite schema is `backtest_csv_statistics_v1` and incompatible
 tables are rebuilt without migration. Auto Threshold resets each date,
 initializes from the first completed Bar raw `open`, and applies
 signal-driven updates to the following Bar. Numeric thresholds with an
@@ -1664,16 +1664,20 @@ END Bar 也先以 AVAILABLE 被取出，下一次才是 `END`。未收盘且 out
 zone-aware, minute-rounded ISO `timestamp`; its `(symbol, date)` key is
 unchanged. At the terminal state of a daily run, persisted processed Bars and
 signal events produce `single_day_run.first_threshold`, `signal_count`,
-`best_price`, `best_order_price`, `best_reward`, and `efficiency`. BUY selects
-minimum `trend_price` and signal price; SELL selects maximum values. A no-signal
-day has zero signals and null price/reward/efficiency values.
+`best_price`, `best_order_price`, and `efficiency`. BUY selects minimum
+`trend_price` and signal price; SELL selects maximum values. `best_reward` is
+the clamped 0-1 symmetric relative proximity between best order price and best
+price. A no-signal day has zero signals and null price/reward/efficiency values.
 
 After each Backtest parameter-set scan, one `run_summary` row is written for
 the `run_id`. It aggregates total Bars/signals and averages from completed days
-that processed Bars. No-signal days contribute zero to average signal count but
-are excluded from reward and efficiency averages. Any failed daily run marks
-the scan summary FAILED; skipped days do not. Live uses the same statistics and
-writes its one-day `run_summary` during the atomic terminal persistence.
+that processed Bars. It also records maximum daily signal count, reward, and
+efficiency. No-signal days contribute zero to average signal count but are
+excluded from reward and efficiency aggregates. Any failed daily run marks
+the scan summary FAILED; skipped days do not. Backtest retains processed records
+in memory and writes one full-schema CSV per run ID instead of SQLite processed
+rows. Live uses the same statistics and writes its one-day `run_summary` during
+the atomic terminal persistence.
 
 ## Phase 5 Current State (2026-07-14)
 
