@@ -13,7 +13,7 @@ from ibapi.order import Order
 from ibapi.wrapper import EWrapper
 from ibapi import server_versions
 
-from ..domain.errors import HistoricalDataError, IbApiError
+from ..domain.errors import GatewayConnectionError, HistoricalDataError, IbApiError
 from ..domain.models import RawBar, TradingSession
 from ..support.logging import StructuredLogger
 from .config import IbConfig
@@ -71,7 +71,6 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
         self._next_order_id: int | None = None
         self._pending: dict[int, _PendingRequest] = {}
         self._live_callbacks: dict[int, tuple[str, LiveBarCallbacks]] = {}
-        self._connection_error: Exception | None = None
         self._accounts_ready = threading.Event()
         self._managed_accounts: tuple[str, ...] = ()
         self._logger = logger
@@ -96,21 +95,20 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
         self._ready.clear()
         self._accounts_ready.clear()
         self._managed_accounts = ()
-        self._connection_error = None
         self._info("ibapi_connecting", host=self.config.host, port=self.config.port, client_id=self.config.client_id)
         self.connect(self.config.host, self.config.port, self.config.client_id)
         self._thread = threading.Thread(target=self.run, name="ibapi-event-loop", daemon=True)
         self._thread.start()
         if not self._ready.wait(self.config.connect_timeout):
             self.disconnect()
-            raise IbApiError("Timed out waiting for IBAPI nextValidId; verify TWS API connection and client ID")
+            raise GatewayConnectionError("Timed out waiting for IBAPI nextValidId; verify TWS API connection and client ID")
         if require_account:
             self._await_single_account()
         self._info("ibapi_connected", client_id=self.config.client_id)
 
     def _await_single_account(self) -> None:
         if not self._accounts_ready.wait(self.config.connect_timeout):
-            raise IbApiError("Timed out waiting for IBAPI managedAccounts callback")
+            raise GatewayConnectionError("Timed out waiting for IBAPI managedAccounts callback")
         if len(self._managed_accounts) != 1:
             raise IbApiError(
                 "Expected exactly one managed account, got "
@@ -192,7 +190,7 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
             error_code=errorCode, error_message=errorString,
             advanced_order_reject_json=advancedOrderRejectJson or None,
         )
-        if errorCode in {2104, 2106, 2158}:
+        if errorCode in {1100, 1101, 1102, 1300, 502, 2103, 2104, 2105, 2106, 2157, 2158}:
             return
         error = IbApiError(f"IBAPI error {errorCode} for request {reqId}: {errorString}")
         with self._lock:
@@ -205,12 +203,6 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
             live = self._live_callbacks.get(reqId)
         if live is not None:
             self._fail_live(reqId, error)
-        elif errorCode in {1100, 1300, 502}:
-            self._connection_error = error
-            for item in tuple(self._pending.values()):
-                item.error = error
-                item.event.set()
-            self._fail_all_live(error)
 
     def historicalData(self, reqId: int, bar: object) -> None:  # noqa: N802
         with self._lock:
@@ -234,12 +226,11 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
                 pending.event.set()
 
     def connectionClosed(self) -> None:  # noqa: N802
-        error = IbApiError("TWS closed the IBAPI connection")
-        self._connection_error = error
+        self._error("ibapi_connection_closed")
+        error = GatewayConnectionError("TWS closed the IBAPI connection")
         for pending in tuple(self._pending.values()):
             pending.error = error
             pending.event.set()
-        self._fail_all_live(error)
 
     def historicalDataEnd(self, reqId: int, start: str, end: str) -> None:  # noqa: N802
         with self._lock:
@@ -329,9 +320,7 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
 
     def _new_request(self) -> tuple[int, _PendingRequest]:
         if not self.is_connected():
-            raise IbApiError("IBAPI gateway is not connected")
-        if self._connection_error is not None:
-            raise self._connection_error
+            raise GatewayConnectionError("IBAPI gateway is not connected")
         with self._lock:
             request_id = self._next_request_id
             self._next_request_id += 1

@@ -14,7 +14,7 @@ import yaml
 
 from ..bar_feed.live_paper_feed import LivePaperFeed
 from ..domain.enums import Direction, RunMode, ThresholdMode
-from ..domain.errors import InputValidationError, NonTradingDayError
+from ..domain.errors import GatewayConnectionError, InputValidationError, NonTradingDayError, RecoverableBarTimeout
 from ..domain.models import RunContext, TradingSession
 from ..domain.parameters import load_parameter_sets
 from ..domain.states import RuntimeState
@@ -290,6 +290,38 @@ def wait_for_session_start(
         sleep(sleep_seconds)
 
 
+def recovery_delay_seconds(recovery_count: int) -> float:
+    if recovery_count == 1:
+        return 20.0
+    if recovery_count == 2:
+        return 60.0
+    if recovery_count == 3:
+        return 15 * 60.0
+    return 60 * 60.0
+
+
+def wait_for_recovery(
+    clock: Clock,
+    session_end_et: datetime,
+    recovery_count: int,
+    reporter: LiveCliReporter,
+    sleep: Callable[[float], None],
+) -> bool:
+    remaining = (session_end_et - clock.now_et()).total_seconds()
+    if remaining <= 0:
+        return False
+    delay = min(recovery_delay_seconds(recovery_count), remaining)
+    reporter.info(
+        "live_recovery_waiting",
+        f"RECOVERY: attempt={recovery_count} wait={format_duration(delay)}",
+        recovery_count=recovery_count,
+        wait_seconds=delay,
+        session_end_et=session_end_et.isoformat(),
+    )
+    sleep(delay)
+    return clock.now_et() < session_end_et
+
+
 def execute_live(
     args: argparse.Namespace,
     clock: Clock,
@@ -314,7 +346,6 @@ def execute_live(
     state: RuntimeState | None = None
     logger: JsonLineLogger | None = None
     run_created = False
-    runner_started = False
     try:
         gateway.connect_gateway()
         now = clock.now_et()
@@ -335,10 +366,11 @@ def execute_live(
         run_logger = TerminalMirrorLogger(logger)
         gateway.set_logger(run_logger)
         order_gateway.set_logger(run_logger)
+        order_gateway.connect_gateway(require_account=True)
+        gateway.disconnect_gateway()
+        order_gateway.disconnect_gateway()
         repositories.create(context)
         run_created = True
-        order_submitter = LiveOrderSubmitter(order_gateway, config.shares, run_logger)
-        order_submitter.start()
         reporter.info("run_created", f"RUN: created run_id={run_id}", run_id=run_id, symbol=context.symbol, trade_date=context.trade_date.isoformat(), parameter_set_id=parameter_set.parameter_set_id)
         reporter.info(
             "session_resolved",
@@ -356,29 +388,66 @@ def execute_live(
             session_end_et=session.session_end_et.isoformat() if session.session_end_et else None,
         )
         assert session.session_start_et is not None
+        assert session.session_end_et is not None
         wait_for_session_start(clock, session.session_start_et, reporter, sleep)
-        def heartbeat(fields: dict[str, object]) -> None:
-            print(
-                "HEARTBEAT "
-                f"run_id={run_id} processed_bar_count={state.processed_bar_count} "
-                + " ".join(f"{key}={value}" for key, value in fields.items())
-            )
+        remaining_shares = config.shares
+        recovery_count = 0
+        recovery = False
+        while clock.now_et() < session.session_end_et:
+            feed = None
+            try:
+                gateway.connect_gateway()
+                order_submitter = LiveOrderSubmitter(order_gateway, remaining_shares, run_logger)
+                order_submitter.start()
+                state = RuntimeState.empty(parameter_set, config.threshold)
 
-        feed = LivePaperFeed(config.symbol, session, gateway, repositories, clock, heartbeat, run_logger)
-        runner_started = True
-        summary = SingleDayRunner(database, repositories, clock, run_logger).execute_run(
-            context, feed, state, create_run=False, on_first_bar_confirmed=feed.mark_first_bar_confirmed,
-            session=session, order_submitter=order_submitter,
-        )
-        print(json.dumps({
-            "run_id": summary.run_id,
-            "trade_date": summary.trade_date.isoformat(),
-            "status": summary.status.value,
-            "processed_bar_count": summary.processed_bar_count,
-            "signal_count": summary.signal_count,
-        }))
+                def heartbeat(fields: dict[str, object]) -> None:
+                    print(
+                        "HEARTBEAT "
+                        f"run_id={run_id} processed_bar_count={state.processed_bar_count} "
+                        + " ".join(f"{key}={value}" for key, value in fields.items())
+                    )
+
+                feed = LivePaperFeed(config.symbol, session, gateway, repositories, clock, heartbeat, run_logger)
+                summary = SingleDayRunner(database, repositories, clock, run_logger).execute_run(
+                    context, feed, state, create_run=False, on_first_bar_confirmed=feed.mark_first_bar_confirmed,
+                    session=session, order_submitter=order_submitter, recovery=recovery,
+                )
+                print(json.dumps({
+                    "run_id": summary.run_id,
+                    "trade_date": summary.trade_date.isoformat(),
+                    "status": summary.status.value,
+                    "processed_bar_count": summary.processed_bar_count,
+                    "signal_count": summary.signal_count,
+                }))
+                return
+            except (RecoverableBarTimeout, GatewayConnectionError) as exc:
+                recovery_count += 1
+                repositories.increment_recovery_count(context.run_id, context.trade_date)
+                restored = repositories.latest_remaining_shares(context.run_id)
+                remaining_shares = config.shares if restored is None else restored
+                run_logger.error(
+                    "live_recovery_requested", run_id=context.run_id,
+                    recovery_count=recovery_count, error_type=type(exc).__name__, error_message=str(exc),
+                )
+                if feed is not None:
+                    feed.close()
+                gateway.disconnect_gateway()
+                order_gateway.disconnect_gateway()
+                recovery = True
+                if wait_for_recovery(clock, session.session_end_et, recovery_count, reporter, sleep):
+                    continue
+                break
+            finally:
+                if feed is not None:
+                    feed.close()
+                gateway.disconnect_gateway()
+                order_gateway.disconnect_gateway()
+        assert state is not None
+        ended_error = RecoverableBarTimeout("Live recovery window ended at session close")
+        raise ended_error
     except Exception as exc:
-        if run_created and not runner_started and context is not None and state is not None:
+        if run_created and context is not None and state is not None:
             summary = build_failed_summary(context, state, exc, clock.now_et())
             try:
                 repositories.fail_with_summary(summary)
@@ -388,7 +457,7 @@ def execute_live(
                 logger.error("run_failed", run_id=context.run_id, error_type=type(exc).__name__, error_message=str(exc))
         raise
     finally:
-        if feed is not None and not runner_started:
+        if feed is not None:
             feed.close()
         gateway.disconnect_gateway()
         order_gateway.disconnect_gateway()

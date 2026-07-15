@@ -1154,12 +1154,10 @@ If SQLite persistence fails after order submission, log the error, advance with
 the calculated RuntimeState, and continue to the next Bar. Do not retry that
 Bar or order.
 
-Until the first Bar is successfully persisted, every error is raised and ends
-the run. Afterwards, non-fatal errors are logged, the current Bar is skipped,
-and the process continues; duplicate logs for a persistent error are allowed.
-A non-fatal Feed error is cleared and the Runner waits for the next Feed
-callback without resubscribing. Fatal-error classification is intentionally
-defined only from observed exceptions and must not be inferred.
+SQLite persistence errors are raised and end the run. A missing completed Bar
+past its expected timestamp plus five minutes raises a recoverable timeout;
+the Live CLI reconnects and replays the same run. IBAPI system connection
+notifications only log and do not directly cancel the subscription.
 
 ## 10.4 Explicit non-goals
 
@@ -1179,10 +1177,9 @@ defined only from observed exceptions and must not be inferred.
 - Account discovery, separate client IDs, order-ID separation, and reconnect
   rules are covered by fake IBAPI tests.
 - A local order-call error preserves the current `shares` entry.
-- A post-submission SQLite error advances runtime state without retrying the
-  Bar or order.
-- First-Bar failures end the run; later non-fatal Feed errors clear and wait
-  for a later callback.
+- A SQLite error terminates the run without retrying the Bar or order.
+- A completed-Bar timeout triggers same-run recovery; connection status alone
+  does not cancel the subscription.
 
 ---
 
@@ -1365,3 +1362,16 @@ processed Bars/signals and `avg_signal_count_per_day`,
 completed days that processed Bars; zero-signal days contribute to signal-count
 average but are excluded from reward and efficiency averages. Any failed day
 makes the scan summary FAILED, while skipped days do not.
+
+## Live connection recovery current state
+
+Live closes market and order gateways after pre-market information reads and
+reopens them after market open. IBAPI system connection messages are logging
+events; the recovery trigger is a completed-Bar deadline exceeded by five
+minutes. The first and final expectations are `session_start` and `session_end`.
+Recovery keeps the same run ID, restores shares from the latest single event,
+increments the daily recovery count, and replays from session start. Replayed
+raw/processed Bars use upsert; single events remain insert-only and replayed
+HIST Bars do not submit orders. Delay retries are 20 seconds, one minute,
+15 minutes, then one hour until session close, which marks an unrecovered Run
+FAILED. Single events persist nullable `share` plus JSON `remained_shares`.

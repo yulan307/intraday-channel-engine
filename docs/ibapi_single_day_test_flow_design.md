@@ -507,7 +507,7 @@ flowchart TD
     K -->|"local exception"| M["Log; retain shares entry"]
     M --> L
     L -->|"success"| N["Advance RuntimeState"]
-    L -->|"SQLite error after submission"| O["Log; advance calculated RuntimeState; skip Bar"]
+    L -->|"SQLite error after submission"| O["Terminate run"]
 ```
 
 The Live YAML `shares` list is required and contains positive integer
@@ -516,13 +516,12 @@ separators. A normally returning `placeOrder()` consumes the current entry;
 there is no order acknowledgement, fill, status, funds, holdings, or position
 check.
 
-Before the first Bar is successfully persisted, every error is raised. After
-that boundary, non-fatal errors log and skip the current Bar. A Feed error is
-cleared and waits for the next callback without resubscription; repeated logs
-are allowed. Order connection startup retries three times and then terminates;
-after the first persisted Bar, disconnection retries three times and continues,
-and a later submission performs one final reconnect attempt before logging and
-skipping on failure.
+SQLite persistence errors are raised and terminate the run. A completed-Bar
+timeout is handled by the outer Live recovery loop; IBAPI system connection
+notifications only log, so their effect is observed through that timeout if
+the subscription stops delivering Bars. Order connection startup retries three
+times and then terminates; a later submission performs one final reconnect
+attempt before logging and skipping on failure.
 
 ### 9.3 实时 Bar 完成条件
 
@@ -1722,6 +1721,23 @@ Live CLI 在 Session 解析成功后、盘前等待前创建 `single_day_run`，
 LivePaperFeed -> CompletedBar -> process_bar -> processed_1m_bar/signal_event
 -> atomic run_summary + single_day_run terminal status
 ```
+
+## Live connection recovery current state
+
+```text
+pre-market reads -> close gateways -> wait for market open
+-> connect gateways -> Live Runner
+-> completed-Bar deadline exceeded by 5 minutes
+-> close gateways -> restore shares from latest signal_event
+-> increment recovery_count -> delay/retry same run_id
+-> replay session start -> resume Live processing
+```
+
+Connection-status callbacks are logged and rely on the completed-Bar deadline
+for recovery. Replay upserts raw/processed Bars, preserves single events, and
+does not submit orders for replayed HIST Bars. Retries use 20 seconds, one
+minute, 15 minutes, then one hour until session close, when an unrecovered Run
+is FAILED.
 
 `HIST`、`LIVE`、`END` 都进入同一算法链；Phase 4 仍在输出前写入 `raw_1m_bar`。
 Runner 的 `WAITING` 调用无参 `wait_for_change()`；Feed 负责在新 callback、错误、关闭、

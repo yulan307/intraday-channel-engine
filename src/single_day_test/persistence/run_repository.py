@@ -24,3 +24,6 @@ class RunRepository(Protocol):
 
     def fail_with_summary(self, summary: RunSummary, *, write_run_summary: bool = True) -> None:
         ...
+
+    def increment_recovery_count(self, run_id: str, trade_date: date) -> None:
+        ...

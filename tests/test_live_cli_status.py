@@ -11,7 +11,7 @@ import pytest
 import yaml
 
 from single_day_test.application import live_cli
-from single_day_test.application.live_cli import LiveCliReporter, resolve_live_session, wait_for_session_start, wait_report_interval
+from single_day_test.application.live_cli import LiveCliReporter, recovery_delay_seconds, resolve_live_session, wait_for_session_start, wait_report_interval
 from single_day_test.domain.models import TradingSession
 from single_day_test.support.logging import JsonLineLogger
 
@@ -103,6 +103,10 @@ def test_wait_reporting_intervals_and_fake_clock_output(tmp_path: Path, capsys: 
     events = [json.loads(line) for line in (tmp_path / "run.jsonl").read_text(encoding="utf-8").splitlines()]
     assert [item["event"] for item in events] == ["session_waiting"] * 8
     assert [item["next_status_seconds"] for item in events] == [3600, 900, 60, 60, 60, 60, 60, 1]
+
+
+def test_recovery_delay_schedule() -> None:
+    assert [recovery_delay_seconds(value) for value in range(1, 6)] == [20.0, 60.0, 900.0, 3600.0, 3600.0]
 
 
 def test_main_converts_invalid_yaml_to_logged_exit_code_two(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:

@@ -104,7 +104,7 @@ class Feed:
 
 
 class Submitter:
-    def __init__(self) -> None: self.calls: list[tuple[str, Direction]] = []
+    def __init__(self) -> None: self.calls: list[tuple[str, Direction]] = []; self.current_quantity = 1; self.remaining_shares = ()
     def recover_after_first_bar(self) -> bool: return True
     def submit(self, symbol: str, direction: Direction, *, raise_on_error: bool) -> bool:
         self.calls.append((symbol, direction)); return True
@@ -154,7 +154,26 @@ def test_post_order_persistence_failure_advances_state_without_retry(tmp_path: P
         original_insert(value)  # type: ignore[arg-type]
     monkeypatch.setattr(repos, "insert", fail_second)
     feed = Feed([FeedEvent(FeedStatus.BAR_AVAILABLE, bar(0, BarSource.HIST)), FeedEvent(FeedStatus.BAR_AVAILABLE, bar(1, BarSource.LIVE)), FeedEvent(FeedStatus.BAR_END, None)])
-    summary = SingleDayRunner(database, repos, clock).execute_run(context(clock), feed, RuntimeState.empty(params(), 100), order_submitter=submitter)
+    with pytest.raises(PersistenceError, match="sqlite failed after order"):
+        SingleDayRunner(database, repos, clock).execute_run(context(clock), feed, RuntimeState.empty(params(), 100), order_submitter=submitter)
     assert submitter.calls == [("AAPL", Direction.BUY)]
-    assert summary.processed_bar_count == 2
     assert database.connection.execute("SELECT COUNT(*) FROM processed_1m_bar").fetchone()[0] == 1
+
+
+def test_recovery_replay_upserts_processed_bar_and_preserves_single_event(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = Clock(datetime(2025, 1, 2, 9, 33, tzinfo=ET))
+    database = Database(tmp_path / "recovery.sqlite3"); database.initialize(); repos = SqliteRepositories(database)
+    run_context = context(clock); repos.create(run_context)
+    existing = SignalEvent(run_context.run_id, bar(0, BarSource.HIST).raw.timestamp_et, DecisionLabel.BUY, 100, 1, 10, (10, 10))
+    with database.transaction():
+        repos.insert(existing)
+    force_signal(monkeypatch)
+    feed = Feed([FeedEvent(FeedStatus.BAR_AVAILABLE, bar(0, BarSource.HIST)), FeedEvent(FeedStatus.BAR_END, None)])
+
+    SingleDayRunner(database, repos, clock).execute_run(
+        run_context, feed, RuntimeState.empty(params(), 100), create_run=False, recovery=True,
+    )
+
+    assert database.connection.execute("SELECT COUNT(*) FROM processed_1m_bar").fetchone()[0] == 1
+    assert database.connection.execute("SELECT COUNT(*) FROM signal_event").fetchone()[0] == 1
+    assert repos.latest_remaining_shares(run_context.run_id) == (10, 10)

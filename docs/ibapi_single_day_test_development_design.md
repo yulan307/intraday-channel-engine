@@ -2411,8 +2411,7 @@ Codex 实施时必须：
 Core Engine 保持无 IO
 每个模块同步编写单元测试
 数据库写入使用事务
-Phase 0–5 每根 Bar 保存后才提交 RuntimeState；Phase 7 的
-post-submission SQLite failure 按 Phase 7 规则推进已计算的 RuntimeState
+每根 Bar 的 SQLite persistence failure 都是 terminal；不会推进 RuntimeState
 所有时间使用 America/New_York aware datetime
 ```
 
@@ -2617,12 +2616,11 @@ event. If that SQLite write fails after a submission, it logs the failure,
 advances to the already calculated RuntimeState, and skips to the next Bar; it
 does not retry the Bar or order.
 
-Until the first Bar has persisted successfully, every error is fatal and is
-raised. Afterwards, non-fatal errors are logged, the current Bar is skipped,
-and processing continues. A Feed error in this later period is cleared before
-waiting for the next callback, without resubscribing. Repeated records of a
-persistent non-fatal error are allowed. New fatal categories are determined
-only after an observed exception is reviewed.
+SQLite persistence errors are terminal and are raised. A missing completed Bar
+past the expected timestamp plus five minutes raises `RecoverableBarTimeout`;
+the Live CLI handles that timeout by reconnecting and replaying the same run.
+IBAPI system connection notifications are logged and do not directly cancel the
+subscription. Other error categories retain their explicit local handling.
 
 ## 30. Current run statistics storage
 
@@ -2649,3 +2647,18 @@ signal count/reward/efficiency over completed dates that processed Bars.
 Zero-signal dates count toward average and maximum signal count but are excluded
 from reward and efficiency aggregates. A failed daily run makes the aggregate
 status FAILED; skipped dates do not.
+
+## 31. Live connection recovery current state
+
+The Live CLI closes both IBAPI gateways after pre-market session/account reads
+and reconnects them only after market open. System connection notifications are
+logged without cancelling the Live subscription. Feed output uses a five-minute
+deadline after the expected Bar time (`session_start` for the first Bar and
+`session_end` for the final Bar). A timeout restarts the same `run_id`: it
+closes both gateways, restores shares from the latest `signal_event` snapshot,
+increments `single_day_run.recovery_count`, reconnects, and replays from session
+start. Replay upserts raw and processed Bars, leaves `signal_event` insert-only,
+and submits no orders for replayed HIST Bars. Retry delays are 20 seconds, one
+minute, 15 minutes, then one hour until session close; an unrecovered Run is
+FAILED. `signal_event` adds nullable `share` and JSON `remained_shares`; SQLite
+write failures terminate the Run.
