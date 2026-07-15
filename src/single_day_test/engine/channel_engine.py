@@ -20,6 +20,19 @@ class CurrentChannelModel:
     low_percentile: float
 
 
+def select_current_model_bars(
+    bars: Sequence[ChannelBar], params: ParameterSet
+) -> Sequence[ChannelBar]:
+    """Select the oldest channel bars used for the current model."""
+    count = len(bars)
+    delay = params.trend_window // 2
+    if count <= delay:
+        return bars
+    if count <= 2 * delay:
+        return bars[:delay]
+    return bars[: count - delay]
+
+
 def is_last_model_ready(state: ChannelState) -> bool:
     return all(
         value is not None
@@ -113,7 +126,9 @@ class ChannelEngine:
         if len(next_state.bars) > params.channel_window:
             next_state.bars = next_state.bars[-params.channel_window:]
 
-        current_model = calculate_current_model(next_state.bars, params)
+        current_model = calculate_current_model(
+            select_current_model_bars(next_state.bars, params), params
+        )
         self._set_current_model(next_state, current_model)
         return (
             ChannelResult(

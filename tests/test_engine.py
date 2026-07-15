@@ -11,7 +11,11 @@ from single_day_test.domain.errors import InputValidationError
 from single_day_test.domain.models import ChannelBar, CompletedBar, RawBar, TrendResult
 from single_day_test.domain.parameters import ParameterSet
 from single_day_test.domain.states import ChannelState, DecisionState, TrendState
-from single_day_test.engine.channel_engine import ChannelEngine, calculate_current_model
+from single_day_test.engine.channel_engine import (
+    ChannelEngine,
+    calculate_current_model,
+    select_current_model_bars,
+)
 from single_day_test.engine.decision_engine import DecisionEngine
 from single_day_test.engine.regression import linear_regression
 from single_day_test.engine.trend_engine import TrendEngine, classify_raw_trend
@@ -149,6 +153,33 @@ def test_channel_current_model_uses_latest_x_origin_and_absolute_deviation() -> 
     assert model.intercept == pytest.approx(3.0)
     assert model.high_percentile == pytest.approx(1.0)
     assert model.low_percentile == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize(
+    ("count", "expected_count"),
+    [(count, min(count, 5) if count <= 10 else count - 5) for count in range(1, 16)],
+)
+def test_channel_current_model_uses_delayed_oldest_stack_window(
+    count: int, expected_count: int
+) -> None:
+    bars = [
+        ChannelBar(
+            datetime(2025, 1, 15, 9, 30, tzinfo=ET) + timedelta(minutes=index),
+            float(index),
+            float(index + 1),
+            float(index - 1),
+        )
+        for index in range(count)
+    ]
+
+    selected = select_current_model_bars(
+        bars, params(trend_window=10, channel_window=30)
+    )
+
+    assert len(selected) == expected_count
+    assert [bar.price for bar in selected] == [
+        float(index) for index in range(expected_count)
+    ]
 
 
 def test_channel_switch_keeps_current_prediction_and_promotes_old_model() -> None:

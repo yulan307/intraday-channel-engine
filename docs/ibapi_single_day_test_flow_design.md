@@ -865,8 +865,8 @@ last_trend_bar_count = null
 ```
 
 `channel_stack` retains at most the latest `channel_window` Bars. The bounded
-stack is the sole input to the current Channel regression and deviation
-percentiles.
+stack is the source for the current Channel regression and deviation
+percentiles, with the delayed selection rule described in section 14.6.
 
 ### 14.2 `last_*` 与 `curr_*`
 
@@ -1102,12 +1102,28 @@ len(channel_stack) < 3
 len(channel_stack) >= 3
 ```
 
-时，使用当前最多 `channel_window` 根 Bar 的 `channel_stack` 重新计算 `curr_*`。
+时，先按 `delay = trend_window // 2` 从旧到新选择用于计算的 Bar，再重新计算 `curr_*`。
 
-`channel_stack` 按 timestamp 从旧到新排列。长度为 `n` 时：
+`channel_stack` 按 timestamp 从旧到新排列。长度为 `n` 时，选择规则为：
 
 ```text
-x = [-(n-1), ..., -2, -1, 0]
+n <= delay:
+    使用 channel_stack[0:n]
+
+delay < n <= 2 * delay:
+    使用 channel_stack[0:delay]
+
+n > 2 * delay:
+    使用 channel_stack[0:n-delay]
+```
+
+Python 切片的右边界不包含，因此第三段使用第 `0` 根到第 `n-delay-1` 根。
+由于 `n <= channel_window`，用于计算的 Bar 数量也不会超过 `channel_window`。
+
+对被选中的 Bar，长度记为 `m`：
+
+```text
+x = [-(m-1), ..., -2, -1, 0]
 ```
 
 例如长度为 4：

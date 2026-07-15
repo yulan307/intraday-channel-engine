@@ -598,7 +598,10 @@ class ChannelState:
 
 `channel_stack` uses a normal `list`, but after each append it retains only the
 latest `channel_window` Bars. Channel regression and deviation percentiles use
-that bounded rolling window.
+the oldest delayed prefix of that bounded rolling window: with
+`delay = trend_window // 2`, use all Bars when `n <= delay`, the first
+`delay` Bars when `delay < n <= 2 * delay`, and `channel_stack[:n-delay]`
+when `n > 2 * delay`.
 
 ### 8.4 DecisionState
 
@@ -2318,8 +2321,9 @@ UP / DOWN / SIDEWAY / null 分类
 curr_* 有效时切换：last_* = old curr_*, count = 1
 curr_* 为空时切换：last_* 与 count 保持
 raw_trend = null 时延续 effective_trend
-stack 长度 < 3 时 curr_* = null
-x 坐标为 [-(n-1), ..., 0]
+先按 `delay = trend_window // 2` 选择最早的 stack 前缀；选择后长度 < 3 时
+curr_* = null
+选中 Bar 数记为 `m`，x 坐标为 [-(m-1), ..., 0]
 high / low deviation 使用 abs
 percentile 使用 method='linear'
 ```

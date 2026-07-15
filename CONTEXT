@@ -33,8 +33,11 @@ Implemented scope:
   date with one non-empty `parameter_set_id` resolves to one daily backtest.
 - Parameter CSV rows use `trend_window` for both Trend regression history and
   valid-slope standard deviation history. `channel_window` is a required
-  integer of at least 3 and caps the rolling Channel history used for Channel
-  regression and deviation percentiles.
+  integer of at least 3 and caps the rolling Channel history. Current Channel
+  regression and deviation percentiles use a delayed oldest prefix of that
+  history: `delay = trend_window // 2`; use all Bars for `n <= delay`, the
+  first `delay` Bars for `delay < n <= 2 * delay`, and `channel_stack[:n-delay]`
+  for `n > 2 * delay`.
 - Fixed Threshold remains unchanged. Auto Threshold resets every date,
   initializes from the first completed Bar's raw `open`, and updates after
   triggered BUY or SELL for the next Bar. `threshold_update_rate` is a 0-100
