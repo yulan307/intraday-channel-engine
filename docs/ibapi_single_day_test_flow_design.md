@@ -1265,6 +1265,10 @@ pred_high = null
     -> NO_BUY
     -> break_count = 0
 
+effective_trend not in (UP, SIDEWAY)
+    -> NO_BUY
+    -> break_count = 0
+
 price >= active_threshold
     -> NO_BUY
     -> break_count = 0
@@ -1295,6 +1299,10 @@ SELL 与 BUY 相反，使用 `pred_low`：
 
 ```text
 pred_low = null
+    -> NO_SELL
+    -> break_count = 0
+
+effective_trend not in (DOWN, SIDEWAY)
     -> NO_SELL
     -> break_count = 0
 
@@ -1534,9 +1542,9 @@ flowchart TD
 
     F --> G{"direction"}
 
-    G -->|"BUY"| H["使用 price / threshold / pred_high<br/>更新 break_count 与 BUY / NO_BUY"]
+    G -->|"BUY"| H["使用 effective_trend + price / threshold / pred_high<br/>更新 break_count 与 BUY / NO_BUY"]
 
-    G -->|"SELL"| I["使用 price / threshold / pred_low<br/>更新 break_count 与 SELL / NO_SELL"]
+    G -->|"SELL"| I["使用 effective_trend + price / threshold / pred_low<br/>更新 break_count 与 SELL / NO_SELL"]
 
     H --> J["拼接完整 Bar"]
     I --> J

@@ -1,5 +1,7 @@
 # Revision History
 
+| 2026-07-15 | `engine/decision_engine.py`, `application/bar_processor.py`, and Decision/Phase 3 tests | Added effective-trend gating to BUY/SELL generation. BUY now also requires UP or SIDEWAY; SELL requires DOWN or SIDEWAY. Existing signal post-processing remains unchanged. | Updated README, CONTEXT, and current Decision Engine flow/development documentation. |
+
 | 2026-07-15 | `domain/parameters.py`, Trend/Channel engines, SQLite persistence, parameter CSV templates, and tests | Replaced obsolete `slope_std_window`, `dev_window`, and `residual_window` fields with required `channel_window`. Trend now uses `trend_window` for both regression and valid-slope history; Channel retains only its latest `channel_window` Bars. Advanced the incompatible SQLite schema to `backtest_run_statistics_v2`. | Updated CONTEXT, current-state flow/development design documents, and this revision history. |
 
 | 2026-07-13 | `application/bar_processor.py`, `persistence/database.py`, `tests/test_phase3_expand.py`, and `tests/test_phase3_ibapi.py` | Auto Threshold signal updates now reset Trend and Channel state for the following Bar while preserving the signal Bar calculation. `processed_1m_bar.decision` now persists `NULL` for no action and only `BUY` or `SELL` for triggered signals; the schema was advanced to `phase3_expand_v2`. | Updated `docs/phase3_expand.md`, `README.md`, `CONTEXT`, and this revision history. |

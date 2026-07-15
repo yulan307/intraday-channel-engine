@@ -29,7 +29,7 @@ def process_bar(context: RunContext, bar: CompletedBar, state: RuntimeState, tre
     else:
         decision_transition = decision_engine.evaluate(
             context.direction, trend.price, active_threshold, channel.pred_high, channel.pred_low,
-            state.decision, context.parameter_set,
+            channel.effective_trend, state.decision, context.parameter_set,
         )
         decision, next_decision = decision_transition.result, decision_transition.next_state_after_persist
     record=ProcessedBarRecord(context.run_id,context.symbol,context.trade_date,bar.raw.timestamp_et,context.mode,bar.source,context.direction,context.parameter_set.parameter_set_id,asdict(context.parameter_set),active_threshold,bar.raw.open,bar.raw.high,bar.raw.low,bar.raw.close,bar.raw.volume,bar.raw.wap,bar.raw.barCount,trend,channel,decision)
