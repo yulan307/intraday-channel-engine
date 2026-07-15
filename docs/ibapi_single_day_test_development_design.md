@@ -520,14 +520,8 @@ class RunSummary:
     direction: Direction
     parameter_set_id: str
     parameter_snapshot: dict[str, object]
-    initial_threshold: float
     processed_bar_count: int
     signal_count: int
-    final_curr_slope: float | None
-    final_curr_intercept: float | None
-    final_high_percentile: float | None
-    final_low_percentile: float | None
-    final_channel_length: int
     status: RunStatus
     started_at_et: datetime
     ended_at_et: datetime
@@ -715,11 +709,11 @@ Phase 3 Expand is implemented. The YAML-first Backtest CLI is the sole
 backtest entry point; explicit CLI options override only matching YAML fields.
 It scans selected `is_active = 1` parameter rows, or one explicitly requested
 `parameter_set_id`, across an inclusive date range. One generated `run_id`
-spans all dates for one parameter set. Daily `single_day_run` and
-`run_summary` records use `(run_id, trade_date)` keys; non-trading dates are
-`SKIPPED`, failures are `FAILED`, later dates continue, and one CSV is exported
-for the run. Incompatible SQLite schemas are rebuilt as `phase3_expand_v3`
-without retaining old data.
+spans all dates for one parameter set. Daily `single_day_run` records use
+`(run_id, trade_date)` keys; `run_summary` has one scan-level row per `run_id`.
+Non-trading dates are `SKIPPED`, failures are `FAILED`, later dates continue,
+and one CSV is exported for the run. Incompatible SQLite schemas are rebuilt as
+`backtest_run_statistics_v1` without retaining old data.
 
 Fixed Threshold remains unchanged. Auto Threshold resets every date,
 initializes from the first completed Bar raw `open`, and updates after a
@@ -1773,18 +1767,23 @@ updated_at              TIMESTAMP NOT NULL
 
 ```text
 symbol                  TEXT NOT NULL
-timestamp               TIMESTAMP NOT NULL
-trade_date              DATE NOT NULL
+date                    INTEGER NOT NULL
+timestamp               TEXT NOT NULL
 open                    REAL NOT NULL
 high                    REAL NOT NULL
 low                     REAL NOT NULL
 close                   REAL NOT NULL
 volume                  REAL NOT NULL
+wap                     REAL NOT NULL
+bar_count               INTEGER NOT NULL
+bar_size                TEXT NOT NULL
+what_to_show            TEXT NOT NULL
+use_rth                 INTEGER NOT NULL
 source                  TEXT NOT NULL
-created_at              TIMESTAMP NOT NULL
-updated_at              TIMESTAMP NOT NULL
+created_at_epoch        INTEGER NOT NULL
+updated_at_epoch        INTEGER NOT NULL
 
-PRIMARY KEY(symbol, timestamp)
+PRIMARY KEY(symbol, date)
 ```
 
 当前只在 Backtest 重新拉取完整 RTH 日数据并校验成功后 upsert。
@@ -1808,6 +1807,12 @@ started_at_epoch        INTEGER NOT NULL
 ended_at_epoch          INTEGER NULL
 error_type              TEXT NULL
 error_message           TEXT NULL
+first_threshold         REAL NULL
+signal_count            INTEGER NOT NULL
+best_price              REAL NULL
+best_order_price        REAL NULL
+best_reward             REAL NULL
+efficiency              REAL NULL
 PRIMARY KEY(run_id, trade_date)
 ```
 
@@ -1879,11 +1884,9 @@ status                  TEXT NOT NULL
 processed_bar_count     INTEGER NOT NULL
 signal_count            INTEGER NOT NULL
 
-final_curr_slope        REAL NULL
-final_curr_intercept    REAL NULL
-final_high_percentile   REAL NULL
-final_low_percentile    REAL NULL
-final_channel_length    INTEGER NOT NULL
+avg_signal_count_per_day REAL NULL
+avg_best_reward_per_day  REAL NULL
+avg_efficiency_per_day   REAL NULL
 
 started_at_et           TIMESTAMP NOT NULL
 ended_at_et             TIMESTAMP NOT NULL
@@ -2597,3 +2600,22 @@ and processing continues. A Feed error in this later period is cleared before
 waiting for the next callback, without resubscribing. Repeated records of a
 persistent non-fatal error are allowed. New fatal categories are determined
 only after an observed exception is reviewed.
+
+## 30. Current run statistics storage
+
+The database schema is `backtest_run_statistics_v1` and is deliberately rebuilt
+when its shape differs. `raw_1m_bar.timestamp` is a minute-rounded,
+America/New_York-aware ISO timestamp in addition to the canonical IBAPI epoch
+`date`.
+
+`single_day_run` is the daily statistics record. It persists the first actual
+threshold, triggered signal count, and direction-aware best persisted
+`trend_price` and signal-event price. BUY selects minima and SELL selects
+maxima. No-signal days leave price/reward/efficiency null; reward and efficiency
+are also null when the first threshold is zero.
+
+`run_summary` is a scan-level table keyed by `run_id`, not a daily table. It
+stores aggregate processed Bar/signal totals and averages over completed dates
+that processed Bars. Zero-signal dates count toward average signal count but
+are excluded from reward and efficiency averages. A failed daily run makes the
+aggregate status FAILED; skipped dates do not.

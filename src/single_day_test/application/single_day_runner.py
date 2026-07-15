@@ -63,6 +63,7 @@ class SingleDayRunner:
         initial_state: RuntimeState,
         *,
         create_run: bool = True,
+        write_run_summary: bool = True,
         on_first_bar_confirmed: Callable[[], None] | None = None,
         session: TradingSession | None = None,
         order_submitter: LiveOrderSubmitter | None = None,
@@ -151,7 +152,10 @@ class SingleDayRunner:
                             self.logger.stop_info_trace()
                 elif event.status is FeedStatus.BAR_END:
                     summary = build_completed_summary(context, state, self.clock.now_et())
-                    self.repositories.complete_with_summary(summary)
+                    if write_run_summary:
+                        self.repositories.complete_with_summary(summary)
+                    else:
+                        self.repositories.complete_with_summary(summary, write_run_summary=False)
                     self._summary("run_completed", run_id=context.run_id, processed_bar_count=summary.processed_bar_count, signal_count=summary.signal_count)
                     return summary
                 elif event.status is FeedStatus.BAR_WAITING:
@@ -161,7 +165,10 @@ class SingleDayRunner:
         except Exception as exc:
             summary = build_failed_summary(context, state, exc, self.clock.now_et())
             try:
-                self.repositories.fail_with_summary(summary)
+                if write_run_summary:
+                    self.repositories.fail_with_summary(summary)
+                else:
+                    self.repositories.fail_with_summary(summary, write_run_summary=False)
             except Exception:
                 pass
             self._error("run_failed", run_id=context.run_id, error_type=type(exc).__name__, error_message=str(exc))

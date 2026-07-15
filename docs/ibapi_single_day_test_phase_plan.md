@@ -504,10 +504,11 @@ Bar itself. The persisted `processed_1m_bar.decision` is null without a
 triggered signal and is `BUY` or `SELL` when one triggers.
 
 Each parameter set receives one generated `run_id` across all selected dates.
-`single_day_run` and daily `run_summary` use `(run_id, trade_date)` keys.
-Non-trading days are `SKIPPED`; failed dates continue; one final CSV aggregates
-all persisted processed rows for the `run_id`. The schema is rebuilt without
-retaining old data when its fields or keys do not match Phase 3 Expand.
+`single_day_run` uses `(run_id, trade_date)` keys; the scan-level `run_summary`
+uses `run_id` as its key. Non-trading days are `SKIPPED`; failed dates continue;
+one final CSV aggregates all persisted processed rows for the `run_id`. The
+schema is rebuilt without retaining old data when its fields or keys do not
+match `backtest_run_statistics_v1`.
 
 ## 6.1 目标
 
@@ -1331,5 +1332,25 @@ completed Bars after emission are logged and skipped. Deterministic fake-clock
 and fake-feed tests cover completion, failure, cleanup, transaction boundaries,
 and shared `run_id` evidence; the real-TWS full-day test remains user-owned.
 
-Orders, retry, recovery, checkpointing, ranking, scan summaries, and automated
-real-TWS acceptance remain outside Phase 5.
+Orders, retry, recovery, checkpointing, ranking, and automated real-TWS
+acceptance remain outside Phase 5.
+
+## Current run statistics storage (authoritative)
+
+`raw_1m_bar` retains the IBAPI UTC epoch `date` and also stores a zone-aware,
+America/New_York, minute-rounded ISO `timestamp`. Its `(symbol, date)` primary
+key is unchanged.
+
+`single_day_run` remains the per-date record keyed by `(run_id, trade_date)`.
+At terminal state it stores `first_threshold`, `signal_count`, `best_price`,
+`best_order_price`, `best_reward`, and `efficiency`. Statistics use persisted
+`trend_price` and signal-event price: BUY selects minima and SELL selects
+maxima. No-signal days store `signal_count = 0` and null price/reward/efficiency
+values; a zero first threshold also leaves reward and efficiency null.
+
+`run_summary` is scan-level and keyed only by `run_id`. It stores total
+processed Bars/signals and `avg_signal_count_per_day`,
+`avg_best_reward_per_day`, and `avg_efficiency_per_day`. Averages include only
+completed days that processed Bars; zero-signal days contribute to signal-count
+average but are excluded from reward and efficiency averages. Any failed day
+makes the scan summary FAILED, while skipped days do not.

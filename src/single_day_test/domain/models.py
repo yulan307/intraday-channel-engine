@@ -215,11 +215,6 @@ class RunSummary:
     parameter_snapshot: dict[str, object]
     processed_bar_count: int
     signal_count: int
-    final_curr_slope: float | None
-    final_curr_intercept: float | None
-    final_high_percentile: float | None
-    final_low_percentile: float | None
-    final_channel_length: int
     status: RunStatus
     started_at_et: datetime
     ended_at_et: datetime

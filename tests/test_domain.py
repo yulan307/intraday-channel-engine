@@ -346,11 +346,6 @@ def test_instantiate_all_dataclasses():
         parameter_snapshot={},
         processed_bar_count=390,
         signal_count=1,
-        final_curr_slope=0.5,
-        final_curr_intercept=100.0,
-        final_high_percentile=95.0,
-        final_low_percentile=5.0,
-        final_channel_length=30,
         status=RunStatus.COMPLETED,
         started_at_et=datetime(2025, 1, 15, 10, 0, tzinfo=ET),
         ended_at_et=datetime(2025, 1, 15, 16, 0, tzinfo=ET),
@@ -443,9 +438,7 @@ def _runsumm_start_factory(dt):
         mode=RunMode.BACKTEST, direction=Direction.BUY,
         parameter_set_id="p1", parameter_snapshot={},
         processed_bar_count=390, signal_count=1,
-        final_curr_slope=0.5, final_curr_intercept=100.0,
-        final_high_percentile=95.0, final_low_percentile=5.0,
-        final_channel_length=30, status=RunStatus.COMPLETED,
+        status=RunStatus.COMPLETED,
         started_at_et=dt,
         ended_at_et=datetime(2025, 1, 15, 16, 0, tzinfo=ET),
         error_type=None, error_message=None,
@@ -458,9 +451,7 @@ def _runsumm_end_factory(dt):
         mode=RunMode.BACKTEST, direction=Direction.BUY,
         parameter_set_id="p1", parameter_snapshot={},
         processed_bar_count=390, signal_count=1,
-        final_curr_slope=0.5, final_curr_intercept=100.0,
-        final_high_percentile=95.0, final_low_percentile=5.0,
-        final_channel_length=30, status=RunStatus.COMPLETED,
+        status=RunStatus.COMPLETED,
         started_at_et=datetime(2025, 1, 15, 10, 0, tzinfo=ET),
         ended_at_et=dt,
         error_type=None, error_message=None,
@@ -641,9 +632,7 @@ def test_immutable_dataclasses_reject_assignment():
         mode=RunMode.BACKTEST, direction=Direction.BUY,
         parameter_set_id="p1", parameter_snapshot={},
         processed_bar_count=390, signal_count=1,
-        final_curr_slope=0.5, final_curr_intercept=100.0,
-        final_high_percentile=95.0, final_low_percentile=5.0,
-        final_channel_length=30, status=RunStatus.COMPLETED,
+            status=RunStatus.COMPLETED,
         started_at_et=datetime(2025, 1, 15, 10, 0, tzinfo=ET),
         ended_at_et=datetime(2025, 1, 15, 16, 0, tzinfo=ET),
         error_type=None, error_message=None,
@@ -779,4 +768,4 @@ def test_protocol_imports():
     assert hasattr(RunRepository, "mark_failed")
     assert hasattr(ProcessedBarRepository, "insert")
     assert hasattr(SignalRepository, "insert")
-    assert hasattr(SummaryRepository, "save")
+    assert hasattr(SummaryRepository, "save_run_summary")

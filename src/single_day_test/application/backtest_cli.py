@@ -114,7 +114,6 @@ class BacktestScanner:
                     ended = datetime.now().astimezone()
                     self.repositories.mark_skipped(context, str(exc))
                     summary = build_skipped_summary(context, state, ended, str(exc))
-                    self.repositories.save_summary(summary)
                     summaries.append(summary)
                     if logger is not None:
                         logger.summary("run_skipped", run_id=run_id, trade_date=trade_date.isoformat(), reason=str(exc))
@@ -123,14 +122,14 @@ class BacktestScanner:
                     ended = datetime.now().astimezone()
                     self.repositories.mark_failed(context.run_id, context.trade_date, ended, type(exc).__name__, str(exc))
                     summaries.append(build_failed_summary(context, state, exc, ended))
-                    self.repositories.save_summary(summaries[-1])
                     if logger is not None:
                         logger.error("run_failed", run_id=run_id, error_type=type(exc).__name__, error_message=str(exc))
                     continue
                 try:
-                    summaries.append(runner.execute_run(context, feed, state, create_run=False))
+                    summaries.append(runner.execute_run(context, feed, state, create_run=False, write_run_summary=False))
                 except Exception:
                     continue
+            self.repositories.save_run_summary(run_id)
             self.repositories.export_processed_run_csv(run_id, self.output_dir)
         return summaries
 

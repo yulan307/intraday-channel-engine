@@ -17,7 +17,7 @@ Implemented scope:
   used for the current Bar decision. Its `decision` value is null when no
   signal triggers, and otherwise is `BUY` or `SELL`. There are no JSON payload
   columns and no persisted `_et` columns.
-- The SQLite schema is `phase3_expand_v3`. Initialization verifies its shape;
+- The SQLite schema is `backtest_run_statistics_v1`. Initialization verifies its shape;
   any incompatible Phase 3 tables are cleared and recreated together. Existing
   data is intentionally not migrated or retained.
 - Backtest startup is YAML-first through the local `configs/backtest.yaml`; the
@@ -41,11 +41,16 @@ Implemented scope:
   `1 + rate/100` to the signal price. A signal-driven
   Auto Threshold update resets Trend and Channel state for that next Bar; the
   signal Bar retains its pre-reset calculations.
-- `single_day_run` records `threshold_update_rate`; it and daily `run_summary`
-  use `(run_id, trade_date)` keys.
+- `single_day_run` records `threshold_update_rate`, the actual first threshold,
+  signal count, and direction-aware daily best-price/reward/efficiency metrics.
+  It uses `(run_id, trade_date)` keys. `run_summary` has one scan-level row per
+  `run_id`, with total counts plus averages across completed days that processed
+  Bars. No-signal days contribute zero to average signal count and are excluded
+  from reward and efficiency averages.
   Non-trading days are `SKIPPED`; failures are `FAILED`; later dates continue.
   Partial processed rows from failed dates remain in the one multi-day
-  `data/<run_id>.csv` export.
+  `data/<run_id>.csv` export. `raw_1m_bar` retains the canonical IBAPI epoch
+  `date` and also persists an ET-aware, minute-rounded ISO `timestamp`.
 
 Excluded scope:
 
