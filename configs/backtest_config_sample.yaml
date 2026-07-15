@@ -19,8 +19,8 @@ threshold_update_rate: 5
 
 # An empty parameter_set_id scans every parameter CSV row with is_active = 1.
 # A non-empty ID selects exactly that row, even when it is inactive.
-parameter_set_path: configs/parameter_set.csv
-parameter_set_id: mu-phase3-v4
+parameter_set_path: configs/parameter_set_sample.csv
+parameter_set_id: mu-phase3-v1
 
 # Supply either date for one-day processing. Supply both dates for an inclusive scan.
 # If one date and one non-empty parameter_set_id resolve, exactly one daily backtest runs.

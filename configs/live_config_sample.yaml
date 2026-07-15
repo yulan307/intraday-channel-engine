@@ -18,8 +18,8 @@ threshold: 950
 threshold_update_rate: 3
 
 # The selected row in the central parameter-set CSV. Phase 5 requires exactly one row.
-parameter_set_path: configs/parameter_set.csv
-parameter_set_id: mu-phase3-v4
+parameter_set_path: configs/parameter_set_sample.csv
+parameter_set_id: mu-phase3-v1
 
 # Selects the paper or live connection profile from configs/ib.yaml.
 # It changes the TWS endpoint. The operator is responsible for selecting paper/live.

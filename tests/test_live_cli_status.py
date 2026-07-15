@@ -8,6 +8,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
+import yaml
 
 from single_day_test.application import live_cli
 from single_day_test.application.live_cli import LiveCliReporter, resolve_live_session, wait_for_session_start, wait_report_interval
@@ -144,10 +145,12 @@ def test_main_converts_invalid_effective_config_to_logged_exit_code_two(tmp_path
 
 def test_main_converts_invalid_requested_date_to_logged_exit_code_two(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     config = tmp_path / "live.yaml"
-    config.write_text(
-        "symbol: AAPL\ndirection: BUY\nthreshold: 100\nparameter_set_path: configs/parameter_set.csv\nparameter_set_id: mu-phase3-v1\nib_environment: paper\nshares: [1]\ntrade_date: 2000-01-01\nlog_level: INFO\n",
-        encoding="utf-8",
+    sample_config = yaml.safe_load(
+        Path("configs/live_config_sample.yaml").read_text(encoding="utf-8")
     )
+    sample_config["parameter_set_path"] = "configs/parameter_set_sample.csv"
+    sample_config["trade_date"] = "2000-01-01"
+    config.write_text(yaml.safe_dump(sample_config), encoding="utf-8")
     args = argparse.Namespace(
         config=config, log_dir=tmp_path / "logs", database=tmp_path / "run.sqlite3",
         ib_config=Path("configs/ib.yaml"), symbol=None, direction=None,
