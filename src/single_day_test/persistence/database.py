@@ -13,7 +13,7 @@ from ..domain.enums import RunStatus
 from ..domain.errors import PersistenceError
 from ..domain.models import ProcessedBarRecord, RawBar, RunContext, RunSummary, SignalEvent, TradingSession
 
-SCHEMA_VERSION = "phase3_expand_v3"
+SCHEMA_VERSION = "backtest_run_statistics_v1"
 
 
 class Database:
@@ -55,7 +55,7 @@ class Database:
           session_start_epoch INTEGER, session_end_epoch INTEGER,
           source TEXT NOT NULL, created_at_epoch INTEGER NOT NULL, updated_at_epoch INTEGER NOT NULL);
         CREATE TABLE raw_1m_bar (
-          symbol TEXT NOT NULL, date INTEGER NOT NULL, open REAL NOT NULL, high REAL NOT NULL,
+          symbol TEXT NOT NULL, date INTEGER NOT NULL, timestamp TEXT NOT NULL, open REAL NOT NULL, high REAL NOT NULL,
           low REAL NOT NULL, close REAL NOT NULL, volume REAL NOT NULL, wap REAL NOT NULL,
           bar_count INTEGER NOT NULL, bar_size TEXT NOT NULL, what_to_show TEXT NOT NULL,
           use_rth INTEGER NOT NULL, source TEXT NOT NULL, created_at_epoch INTEGER NOT NULL,
@@ -65,7 +65,9 @@ class Database:
           live_phase TEXT, direction TEXT NOT NULL, parameter_set_id TEXT NOT NULL,
           parameter_snapshot_json TEXT NOT NULL, threshold_mode TEXT NOT NULL,
           fixed_threshold REAL, threshold_update_rate REAL NOT NULL, status TEXT NOT NULL, started_at_epoch INTEGER NOT NULL,
-          ended_at_epoch INTEGER, error_type TEXT, error_message TEXT,
+          ended_at_epoch INTEGER, error_type TEXT, error_message TEXT, first_threshold REAL,
+          signal_count INTEGER NOT NULL, best_price REAL, best_order_price REAL,
+          best_reward REAL, efficiency REAL,
           PRIMARY KEY(run_id, trade_date));
         CREATE TABLE processed_1m_bar (
           run_id TEXT NOT NULL, date INTEGER NOT NULL, timestamp TEXT NOT NULL, symbol TEXT NOT NULL, trade_date TEXT NOT NULL,
@@ -95,11 +97,11 @@ class Database:
           run_id TEXT NOT NULL, date INTEGER NOT NULL, decision TEXT NOT NULL, price REAL NOT NULL,
           break_count INTEGER NOT NULL, PRIMARY KEY(run_id, date));
         CREATE TABLE run_summary (
-          run_id TEXT NOT NULL, trade_date TEXT NOT NULL, status TEXT NOT NULL, processed_bar_count INTEGER NOT NULL,
-          signal_count INTEGER NOT NULL, final_curr_slope REAL, final_curr_intercept REAL,
-          final_high_percentile REAL, final_low_percentile REAL, final_channel_length INTEGER NOT NULL,
+          run_id TEXT PRIMARY KEY, status TEXT NOT NULL, processed_bar_count INTEGER NOT NULL,
+          signal_count INTEGER NOT NULL, avg_signal_count_per_day REAL,
+          avg_best_reward_per_day REAL, avg_efficiency_per_day REAL,
           started_at_epoch INTEGER NOT NULL, ended_at_epoch INTEGER NOT NULL, error_type TEXT, error_message TEXT,
-          PRIMARY KEY(run_id, trade_date));
+          CHECK (status IN ('COMPLETED', 'FAILED', 'SKIPPED')));
         ''')
         self.connection.execute("INSERT INTO schema_meta VALUES ('schema_version', ?)", (SCHEMA_VERSION,))
         self.connection.commit()
@@ -108,11 +110,11 @@ class Database:
         expected = {
             "schema_meta": ["key", "value"],
             "trade_date": ["trade_date", "is_trading_day", "session_start_epoch", "session_end_epoch", "source", "created_at_epoch", "updated_at_epoch"],
-            "raw_1m_bar": ["symbol", "date", "open", "high", "low", "close", "volume", "wap", "bar_count", "bar_size", "what_to_show", "use_rth", "source", "created_at_epoch", "updated_at_epoch"],
-            "single_day_run": ["run_id", "trade_date", "symbol", "mode", "live_phase", "direction", "parameter_set_id", "parameter_snapshot_json", "threshold_mode", "fixed_threshold", "threshold_update_rate", "status", "started_at_epoch", "ended_at_epoch", "error_type", "error_message"],
+            "raw_1m_bar": ["symbol", "date", "timestamp", "open", "high", "low", "close", "volume", "wap", "bar_count", "bar_size", "what_to_show", "use_rth", "source", "created_at_epoch", "updated_at_epoch"],
+            "single_day_run": ["run_id", "trade_date", "symbol", "mode", "live_phase", "direction", "parameter_set_id", "parameter_snapshot_json", "threshold_mode", "fixed_threshold", "threshold_update_rate", "status", "started_at_epoch", "ended_at_epoch", "error_type", "error_message", "first_threshold", "signal_count", "best_price", "best_order_price", "best_reward", "efficiency"],
             "processed_1m_bar": ["run_id", "date", "timestamp", "symbol", "trade_date", "mode", "bar_source", "direction", "parameter_set_id", "trend_window", "slope_std_window", "dev_window", "residual_window", "r2_threshold", "channel_high_percentile", "channel_low_percentile", "continuous_break_count", "active_threshold", "open", "high", "low", "close", "volume", "wap", "bar_count", "bar_size", "what_to_show", "use_rth", "source", "trend_price", "trend_slope", "trend_r2", "trend_slope_rmse", "trend_slope_std", "trend_fit_ok", "trend_raw_trend", "trend_stack_length_after", "channel_pred_high", "channel_pred_low", "channel_effective_trend", "channel_last_trend_slope", "channel_last_trend_intercept", "channel_last_trend_bar_count", "channel_last_high_percentile", "channel_last_low_percentile", "channel_curr_trend_slope", "channel_curr_trend_intercept", "channel_curr_high_percentile", "channel_curr_low_percentile", "channel_stack_length_after", "decision", "decision_recorded_break_count", "decision_triggered"],
             "signal_event": ["run_id", "date", "decision", "price", "break_count"],
-            "run_summary": ["run_id", "trade_date", "status", "processed_bar_count", "signal_count", "final_curr_slope", "final_curr_intercept", "final_high_percentile", "final_low_percentile", "final_channel_length", "started_at_epoch", "ended_at_epoch", "error_type", "error_message"],
+            "run_summary": ["run_id", "status", "processed_bar_count", "signal_count", "avg_signal_count_per_day", "avg_best_reward_per_day", "avg_efficiency_per_day", "started_at_epoch", "ended_at_epoch", "error_type", "error_message"],
         }
         actual_tables = {row[0] for row in self.connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall() if not row[0].startswith("sqlite_")}
         if actual_tables != set(expected):
@@ -121,7 +123,7 @@ class Database:
             columns = [row[1] for row in self.connection.execute(f'PRAGMA table_info("{table}")').fetchall()]
             if columns != expected_columns:
                 return False
-        for table, primary_key in {"single_day_run": ["run_id", "trade_date"], "processed_1m_bar": ["run_id", "date"], "run_summary": ["run_id", "trade_date"], "signal_event": ["run_id", "date"]}.items():
+        for table, primary_key in {"single_day_run": ["run_id", "trade_date"], "processed_1m_bar": ["run_id", "date"], "run_summary": ["run_id"], "signal_event": ["run_id", "date"]}.items():
             actual_primary_key = [row[1] for row in self.connection.execute(f'PRAGMA table_info("{table}")').fetchall() if row[5] > 0]
             if actual_primary_key != primary_key:
                 return False
@@ -170,16 +172,16 @@ class SqliteRepositories:
     def upsert_many(self, bars: Sequence[RawBar], *, bar_size: str, what_to_show: str, use_rth: bool) -> None:
         now = int(datetime.now().timestamp())
         with self.database.transaction():
-            self.database.connection.executemany('''INSERT INTO raw_1m_bar VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            self.database.connection.executemany('''INSERT INTO raw_1m_bar VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
               ON CONFLICT(symbol,date) DO UPDATE SET open=excluded.open, high=excluded.high, low=excluded.low,
               close=excluded.close, volume=excluded.volume, wap=excluded.wap, bar_count=excluded.bar_count,
               bar_size=excluded.bar_size, what_to_show=excluded.what_to_show, use_rth=excluded.use_rth,
-              source=excluded.source, updated_at_epoch=excluded.updated_at_epoch''',
-              [(b.symbol,b.date,b.open,b.high,b.low,b.close,b.volume,b.wap,b.barCount,bar_size,what_to_show,int(use_rth),'ibapi',now,now) for b in bars])
+              source=excluded.source, timestamp=excluded.timestamp, updated_at_epoch=excluded.updated_at_epoch''',
+              [(b.symbol,b.date,b.timestamp_et.replace(second=0, microsecond=0).isoformat(),b.open,b.high,b.low,b.close,b.volume,b.wap,b.barCount,bar_size,what_to_show,int(use_rth),'ibapi',now,now) for b in bars])
 
     def create(self, context: RunContext) -> None:
         with self.database.transaction():
-            self.database.connection.execute('INSERT INTO single_day_run VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (context.run_id,context.trade_date.isoformat(),context.symbol,context.mode.value,context.live_phase.value if context.live_phase else None,context.direction.value,context.parameter_set.parameter_set_id,json.dumps(context.parameter_set.__dict__),context.threshold_mode.value,context.fixed_threshold,context.threshold_update_rate,RunStatus.RUNNING.value,_epoch(context.started_at_et),None,None,None))
+            self.database.connection.execute('INSERT INTO single_day_run VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (context.run_id,context.trade_date.isoformat(),context.symbol,context.mode.value,context.live_phase.value if context.live_phase else None,context.direction.value,context.parameter_set.parameter_set_id,json.dumps(context.parameter_set.__dict__),context.threshold_mode.value,context.fixed_threshold,context.threshold_update_rate,RunStatus.RUNNING.value,_epoch(context.started_at_et),None,None,None,None,0,None,None,None,None))
 
     def mark_completed(self, run_id: str, trade_date: date, ended_at_et: datetime) -> None: self._mark(run_id, trade_date, RunStatus.COMPLETED, ended_at_et, None)
     def mark_failed(self, run_id: str, trade_date: date, ended_at_et: datetime, error_type: str, error_message: str) -> None: self._mark(run_id, trade_date, RunStatus.FAILED, ended_at_et, (error_type,error_message))
@@ -243,23 +245,123 @@ class SqliteRepositories:
             decision.recorded_break_count, int(decision.triggered),
         ))
 
-    def save_summary(self, summary: RunSummary) -> None:
-        with self.database.transaction(): self.database.connection.execute('INSERT INTO run_summary VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (summary.run_id,summary.trade_date.isoformat(),summary.status.value,summary.processed_bar_count,summary.signal_count,summary.final_curr_slope,summary.final_curr_intercept,summary.final_high_percentile,summary.final_low_percentile,summary.final_channel_length,_epoch(summary.started_at_et),_epoch(summary.ended_at_et),summary.error_type,summary.error_message))
+    def complete_with_summary(self, summary: RunSummary, *, write_run_summary: bool = True) -> None:
+        self._save_terminal_summary(summary, RunStatus.COMPLETED, write_run_summary=write_run_summary)
 
-    def complete_with_summary(self, summary: RunSummary) -> None:
-        self._save_terminal_summary(summary, RunStatus.COMPLETED)
+    def fail_with_summary(self, summary: RunSummary, *, write_run_summary: bool = True) -> None:
+        self._save_terminal_summary(summary, RunStatus.FAILED, write_run_summary=write_run_summary)
 
-    def fail_with_summary(self, summary: RunSummary) -> None:
-        self._save_terminal_summary(summary, RunStatus.FAILED)
-
-    def _save_terminal_summary(self, summary: RunSummary, status: RunStatus) -> None:
+    def _save_terminal_summary(self, summary: RunSummary, status: RunStatus, *, write_run_summary: bool) -> None:
         if summary.status is not status:
             raise PersistenceError(f"Terminal summary status must be {status.value}")
         with self.database.transaction():
-            self.database.connection.execute('INSERT INTO run_summary VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (summary.run_id,summary.trade_date.isoformat(),summary.status.value,summary.processed_bar_count,summary.signal_count,summary.final_curr_slope,summary.final_curr_intercept,summary.final_high_percentile,summary.final_low_percentile,summary.final_channel_length,_epoch(summary.started_at_et),_epoch(summary.ended_at_et),summary.error_type,summary.error_message))
             error_type = summary.error_type if status is RunStatus.FAILED else None
             error_message = summary.error_message if status is RunStatus.FAILED else None
             self.database.connection.execute('UPDATE single_day_run SET status=?, ended_at_epoch=?, error_type=?, error_message=? WHERE run_id=? AND trade_date=?', (status.value,_epoch(summary.ended_at_et),error_type,error_message,summary.run_id,summary.trade_date.isoformat()))
+            self._update_daily_statistics(summary.run_id, summary.trade_date)
+            if write_run_summary:
+                self._upsert_run_summary(summary.run_id)
+
+    def save_run_summary(self, run_id: str) -> None:
+        with self.database.transaction():
+            self._upsert_run_summary(run_id)
+
+    def _update_daily_statistics(self, run_id: str, trade_date: date) -> None:
+        run = self.database.connection.execute(
+            'SELECT direction FROM single_day_run WHERE run_id=? AND trade_date=?',
+            (run_id, trade_date.isoformat()),
+        ).fetchone()
+        if run is None:
+            raise PersistenceError(f"Missing single_day_run for {run_id} {trade_date.isoformat()}")
+        bars = self.database.connection.execute(
+            'SELECT date, active_threshold, trend_price FROM processed_1m_bar WHERE run_id=? AND trade_date=? ORDER BY date',
+            (run_id, trade_date.isoformat()),
+        ).fetchall()
+        signal_rows = self.database.connection.execute(
+            '''SELECT signal_event.price FROM signal_event
+               JOIN processed_1m_bar ON processed_1m_bar.run_id=signal_event.run_id
+                 AND processed_1m_bar.date=signal_event.date
+               WHERE signal_event.run_id=? AND processed_1m_bar.trade_date=?
+               ORDER BY signal_event.date''',
+            (run_id, trade_date.isoformat()),
+        ).fetchall()
+        signal_count = len(signal_rows)
+        first_threshold = bars[0]['active_threshold'] if bars else None
+        if not signal_rows:
+            best_price = best_order_price = best_reward = efficiency = None
+        else:
+            trend_prices = [row['trend_price'] for row in bars]
+            signal_prices = [row['price'] for row in signal_rows]
+            if run['direction'] == 'BUY':
+                best_price = min(trend_prices)
+                best_order_price = min(signal_prices)
+            else:
+                best_price = max(trend_prices)
+                best_order_price = max(signal_prices)
+            if first_threshold in (None, 0):
+                best_reward = efficiency = None
+            else:
+                best_reward = abs(best_order_price - first_threshold) / first_threshold * 100
+                efficiency = best_reward / signal_count
+        self.database.connection.execute(
+            '''UPDATE single_day_run
+               SET first_threshold=?, signal_count=?, best_price=?, best_order_price=?, best_reward=?, efficiency=?
+               WHERE run_id=? AND trade_date=?''',
+            (first_threshold, signal_count, best_price, best_order_price, best_reward, efficiency, run_id, trade_date.isoformat()),
+        )
+
+    def _upsert_run_summary(self, run_id: str) -> None:
+        daily_rows = self.database.connection.execute(
+            '''SELECT single_day_run.*, COUNT(processed_1m_bar.date) AS processed_bar_count
+               FROM single_day_run LEFT JOIN processed_1m_bar
+                 ON processed_1m_bar.run_id=single_day_run.run_id
+                 AND processed_1m_bar.trade_date=single_day_run.trade_date
+               WHERE single_day_run.run_id=?
+               GROUP BY single_day_run.run_id, single_day_run.trade_date
+               ORDER BY single_day_run.trade_date''',
+            (run_id,),
+        ).fetchall()
+        if not daily_rows:
+            raise PersistenceError(f"Cannot summarize unknown run_id {run_id}")
+        statuses = {row['status'] for row in daily_rows}
+        if RunStatus.FAILED.value in statuses:
+            status = RunStatus.FAILED
+        elif RunStatus.COMPLETED.value in statuses:
+            status = RunStatus.COMPLETED
+        else:
+            status = RunStatus.SKIPPED
+        completed = [row for row in daily_rows if row['status'] == RunStatus.COMPLETED.value and row['processed_bar_count'] > 0]
+        signal_counts = [row['signal_count'] for row in completed]
+        rewards = [row['best_reward'] for row in completed if row['best_reward'] is not None]
+        efficiencies = [row['efficiency'] for row in completed if row['efficiency'] is not None]
+        failures = [row for row in daily_rows if row['status'] == RunStatus.FAILED.value]
+        first_failure = failures[0] if failures else None
+        self.database.connection.execute(
+            '''INSERT INTO run_summary (
+                 run_id, status, processed_bar_count, signal_count,
+                 avg_signal_count_per_day, avg_best_reward_per_day, avg_efficiency_per_day,
+                 started_at_epoch, ended_at_epoch, error_type, error_message
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(run_id) DO UPDATE SET
+                 status=excluded.status, processed_bar_count=excluded.processed_bar_count,
+                 signal_count=excluded.signal_count, avg_signal_count_per_day=excluded.avg_signal_count_per_day,
+                 avg_best_reward_per_day=excluded.avg_best_reward_per_day,
+                 avg_efficiency_per_day=excluded.avg_efficiency_per_day,
+                 started_at_epoch=excluded.started_at_epoch, ended_at_epoch=excluded.ended_at_epoch,
+                 error_type=excluded.error_type, error_message=excluded.error_message''',
+            (
+                run_id, status.value,
+                sum(row['processed_bar_count'] for row in daily_rows),
+                sum(row['signal_count'] for row in daily_rows),
+                sum(signal_counts) / len(signal_counts) if signal_counts else None,
+                sum(rewards) / len(rewards) if rewards else None,
+                sum(efficiencies) / len(efficiencies) if efficiencies else None,
+                min(row['started_at_epoch'] for row in daily_rows),
+                max(row['ended_at_epoch'] or row['started_at_epoch'] for row in daily_rows),
+                first_failure['error_type'] if first_failure else None,
+                first_failure['error_message'] if first_failure else None,
+            ),
+        )
 
     def export_processed_run_csv(self, run_id: str, output_dir: str | Path = Path("data")) -> Path:
         rows = self.database.connection.execute(

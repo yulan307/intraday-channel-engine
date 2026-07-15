@@ -96,11 +96,24 @@ calendar dates. Each selected parameter set gets one generated run ID:
 ```
 
 The timestamp uses the local machine timezone and one-second precision. The
-same `run_id` covers all dates for that parameter set. Daily run and summary
-records use `(run_id, trade_date)` as their primary key. Non-trading dates are
-recorded as `SKIPPED`; failed dates are recorded as `FAILED` and later dates
-continue. One multi-day CSV is exported at `data/<run_id>.csv` after all dates
-have been attempted; partial rows written before a failed date remain included.
+same `run_id` covers all dates for that parameter set. Daily `single_day_run`
+records use `(run_id, trade_date)`, while `run_summary` has one scan-level row
+keyed by `run_id`. Non-trading dates are recorded as `SKIPPED`; failed dates
+are recorded as `FAILED` and later dates continue. One multi-day CSV is
+exported at `data/<run_id>.csv` after all dates have been attempted; partial
+rows written before a failed date remain included.
+
+Each raw Bar also stores an ET, zone-aware, minute-rounded `timestamp` beside
+its canonical IBAPI epoch `date`. At each terminal daily run, `single_day_run`
+stores the actual first threshold, triggered signal count, and direction-aware
+best `trend_price` / signal price. BUY selects minima and SELL selects maxima.
+No-signal days store zero signals and null price, reward, and efficiency
+statistics. `best_reward` is the percentage distance between the best signal
+price and first threshold; `efficiency` is that reward divided by signal count.
+For each `run_id`, `run_summary` stores total processed Bars and signals plus
+the average signal count, reward, and efficiency over completed days that
+processed Bars. Reward and efficiency averages exclude no-signal days. A failed
+day makes the scan summary `FAILED`; skipped days do not.
 
 Backtest startup defaults are stored in the local, ignored `configs/backtest.yaml`.
 Use `configs/backtest_config_sample.yaml` as the tracked setup template when
@@ -128,7 +141,7 @@ pre-reset calculation. Fixed Threshold never changes or resets either state.
 
 The tracked parameter template is `configs/parameter_set_sample.csv`; the runtime
 `configs/parameter_set.csv` is local and ignored. The database schema is
-`phase3_expand_v3`. During initialization, any
+`backtest_run_statistics_v1`. During initialization, any
 nonconforming Phase 3 table shape causes the complete Phase 3 database to be
 cleared and recreated; no old data is migrated or retained.
 

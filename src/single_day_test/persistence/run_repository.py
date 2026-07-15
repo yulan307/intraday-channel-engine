@@ -19,8 +19,8 @@ class RunRepository(Protocol):
     ) -> None:
         ...
 
-    def complete_with_summary(self, summary: RunSummary) -> None:
+    def complete_with_summary(self, summary: RunSummary, *, write_run_summary: bool = True) -> None:
         ...
 
-    def fail_with_summary(self, summary: RunSummary) -> None:
+    def fail_with_summary(self, summary: RunSummary, *, write_run_summary: bool = True) -> None:
         ...

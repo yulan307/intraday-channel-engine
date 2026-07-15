@@ -11,8 +11,9 @@ import pytest
 
 from single_day_test.bar_feed.bar_validation import validate_complete_backtest_day
 from single_day_test.domain.errors import HistoricalDataError, PersistenceError
-from single_day_test.domain.enums import BarSource, DecisionLabel, Direction, RunMode, TrendLabel
-from single_day_test.domain.models import ChannelResult, DecisionResult, ProcessedBarRecord, RawBar, TradingSession, TrendResult
+from single_day_test.domain.enums import BarSource, DecisionLabel, Direction, RunMode, RunStatus, ThresholdMode, TrendLabel
+from single_day_test.domain.models import ChannelResult, DecisionResult, ProcessedBarRecord, RawBar, RunContext, RunSummary, SignalEvent, TradingSession, TrendResult
+from single_day_test.domain.parameters import ParameterSet
 from single_day_test.ib.config import IbConfig
 from single_day_test.ib.gateway import IbApiGateway, LiveBarCallbacks, _PendingRequest
 from single_day_test.ib.services import HistoricalBarService, TradingSessionService
@@ -115,6 +116,8 @@ def test_services_cache_schedule_and_validated_ibapi_bars(tmp_path) -> None:
     result = HistoricalBarService(repos, fake).load_or_fetch("AAPL", session)
     assert len(result) == 390 and fake.bar_calls == 1
     assert validate_complete_backtest_day(repos.load_rth_bars("AAPL", session.trade_date), session)
+    timestamp = repos.database.connection.execute("SELECT timestamp FROM raw_1m_bar LIMIT 1").fetchone()[0]
+    assert timestamp == "2025-01-15T09:30:00-05:00"
     HistoricalBarService(repos, fake).load_or_fetch("AAPL", session)
     assert fake.bar_calls == 1
 
@@ -131,21 +134,21 @@ def test_nonconforming_schema_is_cleared_once(tmp_path) -> None:
     path = tmp_path / "legacy.sqlite3"
     sqlite3.connect(path).execute("CREATE TABLE raw_1m_bar (timestamp TEXT)").connection.commit()
     database = Database(path); database.initialize()
-    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "phase3_expand_v3"
+    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "backtest_run_statistics_v1"
 
 
 def test_previous_phase3_schema_is_cleared_once_and_recreated(tmp_path) -> None:
     path = tmp_path / "previous_phase3.sqlite3"
     database = Database(path)
     database.initialize()
-    database.connection.execute("INSERT INTO raw_1m_bar VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                                ("AAPL", 1736951400, 1, 2, 0, 1, 10, 1, 1, "1 min", "TRADES", 1, "test", 1, 1,))
+    database.connection.execute("INSERT INTO raw_1m_bar VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                ("AAPL", 1736951400, "2025-01-15T09:30:00-05:00", 1, 2, 0, 1, 10, 1, 1, "1 min", "TRADES", 1, "test", 1, 1,))
     database.connection.commit()
     database.connection.execute("UPDATE schema_meta SET value='phase3_ibapi_v4' WHERE key='schema_version'")
     database.connection.commit()
     database.initialize()
     assert database.connection.execute("SELECT COUNT(*) FROM raw_1m_bar").fetchone()[0] == 0
-    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "phase3_expand_v3"
+    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "backtest_run_statistics_v1"
     columns = {row[1] for row in database.connection.execute("PRAGMA table_info(processed_1m_bar)")}
     assert {"date", "timestamp", "wap", "bar_count", "bar_size", "what_to_show", "use_rth", "source", "trend_slope", "channel_pred_high", "decision_triggered"} <= columns
     assert not any(column.lower().endswith("_et") or column.lower() == "et" for column in columns)
@@ -193,3 +196,44 @@ def test_processed_run_csv_uses_the_processed_table_fields(tmp_path) -> None:
         if row[1] == "decision"
     )
     assert decision_column[3] == 0
+
+
+def test_terminal_daily_statistics_and_scan_summary_use_persisted_prices(tmp_path) -> None:
+    database = Database(tmp_path / "statistics.sqlite3")
+    database.initialize()
+    repositories = SqliteRepositories(database)
+    params = ParameterSet("p1", 3, 3, 1, 1, 0.8, 95.0, 95.0, 1, 1)
+    started = datetime(2025, 1, 15, 9, 0, tzinfo=ET)
+    context = RunContext("run-1", "AAPL", date(2025, 1, 15), params, Direction.BUY, ThresholdMode.FIXED, 100.0, RunMode.BACKTEST, None, started)
+    repositories.create(context)
+    base = ProcessedBarRecord(
+        "run-1", "AAPL", context.trade_date, datetime(2025, 1, 15, 9, 30, tzinfo=ET), RunMode.BACKTEST, BarSource.HIST,
+        Direction.BUY, "p1", {"trend_window": 3, "slope_std_window": 3, "dev_window": 1, "residual_window": 1,
+        "r2_threshold": 0.8, "channel_high_percentile": 95.0, "channel_low_percentile": 95.0, "continuous_break_count": 1}, 100.0,
+        100.0, 101.0, 99.0, 100.0, 1.0, 100.0, 1,
+        TrendResult(100.0, None, None, None, None, None, None, 1),
+        ChannelResult(None, None, None, None, None, None, None, None, None, None, None, None, 1),
+        DecisionResult(DecisionLabel.NO_BUY, 0, False),
+    )
+    second = replace(base, timestamp_et=datetime(2025, 1, 15, 9, 31, tzinfo=ET), trend=TrendResult(90.0, None, None, None, None, None, None, 1), decision=DecisionResult(DecisionLabel.BUY, 1, True))
+    with database.transaction():
+        repositories.insert(base)
+        repositories.insert(second)
+        repositories.insert(SignalEvent("run-1", second.timestamp_et, DecisionLabel.BUY, 90.0, 1))
+    summary = RunSummary("run-1", "AAPL", context.trade_date, RunMode.BACKTEST, Direction.BUY, "p1", {}, 2, 1, RunStatus.COMPLETED, started, datetime(2025, 1, 15, 16, 0, tzinfo=ET), None, None)
+    repositories.complete_with_summary(summary)
+    daily = database.connection.execute("SELECT first_threshold, signal_count, best_price, best_order_price, best_reward, efficiency FROM single_day_run").fetchone()
+    assert tuple(daily) == pytest.approx((100.0, 1, 90.0, 90.0, 10.0, 10.0))
+    aggregate = database.connection.execute("SELECT run_id, processed_bar_count, signal_count, avg_signal_count_per_day, avg_best_reward_per_day, avg_efficiency_per_day FROM run_summary").fetchone()
+    assert aggregate["run_id"] == "run-1"
+    assert tuple(aggregate)[1:] == pytest.approx((2, 1, 1.0, 10.0, 10.0))
+
+    zero_context = RunContext("run-zero", "AAPL", context.trade_date, params, Direction.SELL, ThresholdMode.FIXED, 0.0, RunMode.BACKTEST, None, started)
+    repositories.create(zero_context)
+    zero_record = replace(base, run_id="run-zero", direction=Direction.SELL, active_threshold=0.0)
+    with database.transaction():
+        repositories.insert(zero_record)
+    zero_summary = RunSummary("run-zero", "AAPL", zero_context.trade_date, RunMode.BACKTEST, Direction.SELL, "p1", {}, 1, 0, RunStatus.COMPLETED, started, datetime(2025, 1, 15, 16, 0, tzinfo=ET), None, None)
+    repositories.complete_with_summary(zero_summary)
+    zero_daily = database.connection.execute("SELECT signal_count, best_price, best_order_price, best_reward, efficiency FROM single_day_run WHERE run_id='run-zero'").fetchone()
+    assert tuple(zero_daily) == (0, None, None, None, None)

@@ -297,6 +297,8 @@ def test_scanner_skips_non_trading_day_and_exports_one_multi_day_csv(tmp_path) -
     assert (tmp_path / "data" / "run-p1.csv").exists()
     rows = database.connection.execute("SELECT run_id, trade_date, status FROM single_day_run ORDER BY trade_date").fetchall()
     assert [(row["run_id"], row["trade_date"], row["status"]) for row in rows] == [("run-p1", "2025-01-02", "COMPLETED"), ("run-p1", "2025-01-03", "SKIPPED")]
+    aggregate = database.connection.execute("SELECT status, avg_signal_count_per_day, avg_best_reward_per_day, avg_efficiency_per_day FROM run_summary WHERE run_id='run-p1'").fetchone()
+    assert tuple(aggregate) == ("COMPLETED", 0.0, None, None)
 
 
 def test_schema_shape_mismatch_is_rebuilt_and_processed_fields_are_exact(tmp_path) -> None:
@@ -344,4 +346,5 @@ def test_failed_day_keeps_partial_processed_rows_in_final_csv(tmp_path) -> None:
     status = database.connection.execute("SELECT status FROM single_day_run WHERE run_id='run-p1'").fetchone()[0]
     rows = database.connection.execute("SELECT COUNT(*) FROM processed_1m_bar WHERE run_id='run-p1'").fetchone()[0]
     assert status == "FAILED" and rows == 2
+    assert database.connection.execute("SELECT status FROM run_summary WHERE run_id='run-p1'").fetchone()[0] == "FAILED"
     assert sum(1 for _ in (tmp_path / "data" / "run-p1.csv").open(encoding="utf-8")) == 3
