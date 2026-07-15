@@ -62,9 +62,7 @@ def _make_params(**overrides):
     base = dict(
         parameter_set_id="p1",
         trend_window=30,
-        slope_std_window=10,
-        dev_window=5,
-        residual_window=5,
+        channel_window=10,
         r2_threshold=0.5,
         channel_high_percentile=95.0,
         channel_low_percentile=95.0,
@@ -136,7 +134,7 @@ def test_error_hierarchy():
 # ---------------------------------------------------------------------------
 def test_parameter_set_valid_boundaries():
     validate_parameter_set(_make_params(trend_window=3))
-    validate_parameter_set(_make_params(slope_std_window=2))
+    validate_parameter_set(_make_params(channel_window=3))
     validate_parameter_set(_make_params(r2_threshold=0.0))
     validate_parameter_set(_make_params(r2_threshold=1.0))
     validate_parameter_set(_make_params(channel_high_percentile=0.0))
@@ -151,9 +149,9 @@ def test_parameter_set_invalid_trend_window():
         validate_parameter_set(_make_params(trend_window=2))
 
 
-def test_parameter_set_invalid_slope_std_window():
-    with pytest.raises(InputValidationError, match="slope_std_window"):
-        validate_parameter_set(_make_params(slope_std_window=1))
+def test_parameter_set_invalid_channel_window():
+    with pytest.raises(InputValidationError, match="channel_window"):
+        validate_parameter_set(_make_params(channel_window=2))
 
 
 def test_parameter_set_invalid_r2_below():
@@ -674,7 +672,7 @@ def test_trend_state_empty():
     params = _params()
     ts = TrendState.empty(params)
     assert ts.bars.maxlen == 30
-    assert ts.valid_slopes.maxlen == 10
+    assert ts.valid_slopes.maxlen == 30
     assert len(ts.bars) == 0
     assert len(ts.valid_slopes) == 0
 
@@ -698,7 +696,7 @@ def test_runtime_state_empty():
     params = _params()
     rs = RuntimeState.empty(params)
     assert rs.trend.bars.maxlen == 30
-    assert rs.trend.valid_slopes.maxlen == 10
+    assert rs.trend.valid_slopes.maxlen == 30
     assert rs.channel.bars == []
     assert rs.decision.break_count == 0
     assert rs.decision_complete is True

@@ -295,9 +295,7 @@ class ParameterSet:
     parameter_set_id: str
 
     trend_window: int
-    slope_std_window: int
-    dev_window: int
-    residual_window: int
+    channel_window: int
 
     r2_threshold: float
 
@@ -311,14 +309,12 @@ class ParameterSet:
 
 | 参数 | 当前用途 |
 | --- | --- |
-| `trend_window` | `trend_stack` 最大长度与 Trend 回归窗口 |
-| `slope_std_window` | 非空 slope 的标准差窗口 |
+| `trend_window` | `trend_stack` 与有效 slope 的最大长度，以及 Trend 回归窗口 |
+| `channel_window` | `channel_stack` 最大长度与 Channel 回归窗口 |
 | `r2_threshold` | Trend 拟合是否有效 |
 | `channel_high_percentile` | Channel high deviation 百分位，范围 0–100 |
 | `channel_low_percentile` | Channel low deviation 百分位，范围 0–100 |
 | `continuous_break_count` | 连续突破触发次数 |
-| `dev_window` | 当前算法保留参数，暂不参与计算 |
-| `residual_window` | 当前算法保留参数，暂不参与计算 |
 
 ### 6.2 参数校验
 
@@ -328,9 +324,9 @@ def validate_parameter_set(params: ParameterSet) -> None:
         raise InputValidationError(
             f"trend_window must be >= 3, got {params.trend_window}"
         )
-    if params.slope_std_window < 2:
+    if params.channel_window < 3:
         raise InputValidationError(
-            f"slope_std_window must be >= 2, got {params.slope_std_window}"
+            f"channel_window must be >= 3, got {params.channel_window}"
         )
     if not (0.0 <= params.r2_threshold <= 1.0):
         raise InputValidationError(
@@ -569,7 +565,7 @@ class TrendState:
     def empty(cls, params: ParameterSet) -> TrendState:
         return cls(
             bars=deque(maxlen=params.trend_window),
-            valid_slopes=deque(maxlen=params.slope_std_window),
+            valid_slopes=deque(maxlen=params.trend_window),
         )
 ```
 
@@ -577,7 +573,7 @@ class TrendState:
 
 ```text
 bars.maxlen = trend_window
-valid_slopes.maxlen = slope_std_window
+valid_slopes.maxlen = trend_window
 ```
 
 ### 8.3 ChannelState
@@ -600,7 +596,9 @@ class ChannelState:
     curr_low_percentile: float | None
 ```
 
-`channel_stack` 当前不限制长度，因此使用普通 `list`。
+`channel_stack` uses a normal `list`, but after each append it retains only the
+latest `channel_window` Bars. Channel regression and deviation percentiles use
+that bounded rolling window.
 
 ### 8.4 DecisionState
 
@@ -713,7 +711,7 @@ spans all dates for one parameter set. Daily `single_day_run` records use
 `(run_id, trade_date)` keys; `run_summary` has one scan-level row per `run_id`.
 Non-trading dates are `SKIPPED`, failures are `FAILED`, later dates continue,
 and one CSV is exported for the run. Incompatible SQLite schemas are rebuilt as
-`backtest_run_statistics_v1` without retaining old data.
+`backtest_run_statistics_v2` without retaining old data.
 
 Fixed Threshold remains unchanged. Auto Threshold resets every date,
 initializes from the first completed Bar raw `open`, and updates after a
@@ -1156,7 +1154,7 @@ def update(...):
     next_valid_slopes = append_with_limit(
         state.valid_slopes,
         reg.slope,
-        maxlen=params.slope_std_window,
+        maxlen=params.trend_window,
     )
 
     if len(next_valid_slopes) < 2:
@@ -2603,7 +2601,7 @@ only after an observed exception is reviewed.
 
 ## 30. Current run statistics storage
 
-The database schema is `backtest_run_statistics_v1` and is deliberately rebuilt
+The database schema is `backtest_run_statistics_v2` and is deliberately rebuilt
 when its shape differs. `raw_1m_bar.timestamp` is a minute-rounded,
 America/New_York-aware ISO timestamp in addition to the canonical IBAPI epoch
 `date`.

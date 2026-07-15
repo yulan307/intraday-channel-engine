@@ -8,9 +8,7 @@ from .errors import InputValidationError
 class ParameterSet:
     parameter_set_id: str
     trend_window: int
-    slope_std_window: int
-    dev_window: int
-    residual_window: int
+    channel_window: int
     r2_threshold: float
     channel_high_percentile: float
     channel_low_percentile: float
@@ -21,8 +19,8 @@ class ParameterSet:
 def load_parameter_sets(path: str | Path, parameter_set_id: str | None = None) -> list[ParameterSet]:
     """Load active rows, or one explicitly selected row, from the central CSV."""
     required = {
-        "parameter_set_id", "trend_window", "slope_std_window", "dev_window",
-        "residual_window", "r2_threshold", "channel_high_percentile",
+        "parameter_set_id", "trend_window", "channel_window", "r2_threshold",
+        "channel_high_percentile",
         "channel_low_percentile", "continuous_break_count", "is_active",
     }
     try:
@@ -41,8 +39,7 @@ def load_parameter_sets(path: str | Path, parameter_set_id: str | None = None) -
         for row in matches:
             params = ParameterSet(
                 parameter_set_id=row["parameter_set_id"], trend_window=int(row["trend_window"]),
-                slope_std_window=int(row["slope_std_window"]), dev_window=int(row["dev_window"]),
-                residual_window=int(row["residual_window"]), r2_threshold=float(row["r2_threshold"]),
+                channel_window=int(row["channel_window"]), r2_threshold=float(row["r2_threshold"]),
                 channel_high_percentile=float(row["channel_high_percentile"]),
                 channel_low_percentile=float(row["channel_low_percentile"]),
                 continuous_break_count=int(row["continuous_break_count"]), is_active=int(row["is_active"]),
@@ -64,9 +61,9 @@ def validate_parameter_set(params: ParameterSet) -> None:
         raise InputValidationError(
             f"trend_window must be >= 3, got {params.trend_window}"
         )
-    if params.slope_std_window < 2:
+    if params.channel_window < 3:
         raise InputValidationError(
-            f"slope_std_window must be >= 2, got {params.slope_std_window}"
+            f"channel_window must be >= 3, got {params.channel_window}"
         )
     if not (0.0 <= params.r2_threshold <= 1.0):
         raise InputValidationError(

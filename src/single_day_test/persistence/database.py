@@ -13,7 +13,7 @@ from ..domain.enums import RunStatus
 from ..domain.errors import PersistenceError
 from ..domain.models import ProcessedBarRecord, RawBar, RunContext, RunSummary, SignalEvent, TradingSession
 
-SCHEMA_VERSION = "backtest_run_statistics_v1"
+SCHEMA_VERSION = "backtest_run_statistics_v2"
 
 
 class Database:
@@ -72,8 +72,7 @@ class Database:
         CREATE TABLE processed_1m_bar (
           run_id TEXT NOT NULL, date INTEGER NOT NULL, timestamp TEXT NOT NULL, symbol TEXT NOT NULL, trade_date TEXT NOT NULL,
           mode TEXT NOT NULL, bar_source TEXT NOT NULL, direction TEXT NOT NULL, parameter_set_id TEXT NOT NULL,
-          trend_window INTEGER NOT NULL, slope_std_window INTEGER NOT NULL, dev_window INTEGER NOT NULL,
-          residual_window INTEGER NOT NULL, r2_threshold REAL NOT NULL,
+          trend_window INTEGER NOT NULL, channel_window INTEGER NOT NULL, r2_threshold REAL NOT NULL,
           channel_high_percentile REAL NOT NULL, channel_low_percentile REAL NOT NULL,
           continuous_break_count INTEGER NOT NULL,
           active_threshold REAL,
@@ -112,7 +111,7 @@ class Database:
             "trade_date": ["trade_date", "is_trading_day", "session_start_epoch", "session_end_epoch", "source", "created_at_epoch", "updated_at_epoch"],
             "raw_1m_bar": ["symbol", "date", "timestamp", "open", "high", "low", "close", "volume", "wap", "bar_count", "bar_size", "what_to_show", "use_rth", "source", "created_at_epoch", "updated_at_epoch"],
             "single_day_run": ["run_id", "trade_date", "symbol", "mode", "live_phase", "direction", "parameter_set_id", "parameter_snapshot_json", "threshold_mode", "fixed_threshold", "threshold_update_rate", "status", "started_at_epoch", "ended_at_epoch", "error_type", "error_message", "first_threshold", "signal_count", "best_price", "best_order_price", "best_reward", "efficiency"],
-            "processed_1m_bar": ["run_id", "date", "timestamp", "symbol", "trade_date", "mode", "bar_source", "direction", "parameter_set_id", "trend_window", "slope_std_window", "dev_window", "residual_window", "r2_threshold", "channel_high_percentile", "channel_low_percentile", "continuous_break_count", "active_threshold", "open", "high", "low", "close", "volume", "wap", "bar_count", "bar_size", "what_to_show", "use_rth", "source", "trend_price", "trend_slope", "trend_r2", "trend_slope_rmse", "trend_slope_std", "trend_fit_ok", "trend_raw_trend", "trend_stack_length_after", "channel_pred_high", "channel_pred_low", "channel_effective_trend", "channel_last_trend_slope", "channel_last_trend_intercept", "channel_last_trend_bar_count", "channel_last_high_percentile", "channel_last_low_percentile", "channel_curr_trend_slope", "channel_curr_trend_intercept", "channel_curr_high_percentile", "channel_curr_low_percentile", "channel_stack_length_after", "decision", "decision_recorded_break_count", "decision_triggered"],
+            "processed_1m_bar": ["run_id", "date", "timestamp", "symbol", "trade_date", "mode", "bar_source", "direction", "parameter_set_id", "trend_window", "channel_window", "r2_threshold", "channel_high_percentile", "channel_low_percentile", "continuous_break_count", "active_threshold", "open", "high", "low", "close", "volume", "wap", "bar_count", "bar_size", "what_to_show", "use_rth", "source", "trend_price", "trend_slope", "trend_r2", "trend_slope_rmse", "trend_slope_std", "trend_fit_ok", "trend_raw_trend", "trend_stack_length_after", "channel_pred_high", "channel_pred_low", "channel_effective_trend", "channel_last_trend_slope", "channel_last_trend_intercept", "channel_last_trend_bar_count", "channel_last_high_percentile", "channel_last_low_percentile", "channel_curr_trend_slope", "channel_curr_trend_intercept", "channel_curr_high_percentile", "channel_curr_low_percentile", "channel_stack_length_after", "decision", "decision_recorded_break_count", "decision_triggered"],
             "signal_event": ["run_id", "date", "decision", "price", "break_count"],
             "run_summary": ["run_id", "status", "processed_bar_count", "signal_count", "avg_signal_count_per_day", "avg_best_reward_per_day", "avg_efficiency_per_day", "started_at_epoch", "ended_at_epoch", "error_type", "error_message"],
         }
@@ -201,7 +200,7 @@ class SqliteRepositories:
         self.database.connection.execute('''
             INSERT INTO processed_1m_bar (
               run_id, date, timestamp, symbol, trade_date, mode, bar_source, direction, parameter_set_id,
-              trend_window, slope_std_window, dev_window, residual_window, r2_threshold,
+              trend_window, channel_window, r2_threshold,
               channel_high_percentile, channel_low_percentile, continuous_break_count,
               active_threshold, open, high, low, close, volume, wap, bar_count,
               bar_size, what_to_show, use_rth, source,
@@ -214,20 +213,20 @@ class SqliteRepositories:
               channel_stack_length_after, decision, decision_recorded_break_count, decision_triggered
             ) VALUES (
               ?, ?, ?, ?, ?, ?,
-              ?, ?, ?, ?, ?, ?, ?,
-              ?, ?, ?, ?, ?, ?, ?,
-              ?, ?, ?, ?, ?, ?, ?,
-              ?, ?, ?, ?, ?, ?, ?,
-              ?, ?, ?, ?, ?, ?, ?,
-              ?, ?, ?, ?, ?,
-              ?, ?, ?, ?, ?, ?, ?
+              ?, ?, ?, ?, ?, ?,
+              ?, ?, ?, ?, ?, ?,
+              ?, ?, ?, ?, ?, ?,
+              ?, ?, ?, ?, ?, ?,
+              ?, ?, ?, ?, ?, ?,
+              ?, ?, ?, ?, ?, ?,
+              ?, ?, ?, ?, ?, ?,
+              ?, ?, ?
             )
         ''', (
             value.run_id, epoch, value.timestamp_et.replace(second=0, microsecond=0).isoformat(),
             value.symbol, value.trade_date.isoformat(), value.mode.value,
             value.bar_source.value, value.direction.value, value.parameter_set_id,
-            parameter['trend_window'], parameter['slope_std_window'], parameter['dev_window'],
-            parameter['residual_window'], parameter['r2_threshold'],
+            parameter['trend_window'], parameter['channel_window'], parameter['r2_threshold'],
             parameter['channel_high_percentile'], parameter['channel_low_percentile'],
             parameter['continuous_break_count'], value.active_threshold,
             value.open, value.high, value.low, value.close, value.volume, value.wap, value.barCount,

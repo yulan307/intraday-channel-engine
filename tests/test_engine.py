@@ -24,9 +24,7 @@ def params(**overrides: object) -> ParameterSet:
     values: dict[str, object] = {
         "parameter_set_id": "phase-1",
         "trend_window": 3,
-        "slope_std_window": 3,
-        "dev_window": 1,
-        "residual_window": 1,
+        "channel_window": 3,
         "r2_threshold": 0.8,
         "channel_high_percentile": 50.0,
         "channel_low_percentile": 50.0,
@@ -119,6 +117,15 @@ def test_trend_engine_warmup_then_classifies_and_preserves_input_state() -> None
     assert fourth.raw_trend is TrendLabel.UP
     assert [item.price for item in state.bars] == []
     assert [item.price for item in state_after_fourth.bars] == [2.0, 3.0, 4.0]
+    fifth, state_after_fifth = engine.update(
+        completed_bar(4, 5.0), state_after_fourth, params()
+    )
+    _, state_after_sixth = engine.update(
+        completed_bar(5, 6.0), state_after_fifth, params()
+    )
+    assert fifth.slope_std == pytest.approx(0.0)
+    assert state_after_sixth.valid_slopes.maxlen == 3
+    assert len(state_after_sixth.valid_slopes) == 3
 
 
 def test_trend_classification_covers_all_labels() -> None:
@@ -192,6 +199,21 @@ def test_channel_null_raw_trend_continues_existing_segment() -> None:
     assert result.pred_high is None
     assert next_state.effective_trend is TrendLabel.UP
     assert next_state.bars[-1].price == pytest.approx(2.0)
+
+
+def test_channel_retains_only_the_latest_channel_window_bars() -> None:
+    engine = ChannelEngine()
+    state = ChannelState.empty()
+    result = None
+    for index, price in enumerate((1.0, 2.0, 3.0, 4.0)):
+        result, state = engine.update(
+            completed_bar(index, price), trend(price, TrendLabel.UP), state,
+            params(channel_window=3),
+        )
+
+    assert result is not None
+    assert result.channel_stack_length_after == 3
+    assert [bar.price for bar in state.bars] == [2.0, 3.0, 4.0]
 
 
 def test_decision_engine_records_trigger_count_and_resets_after_persist() -> None:

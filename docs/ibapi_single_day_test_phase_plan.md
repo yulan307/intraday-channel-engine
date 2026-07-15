@@ -508,7 +508,7 @@ Each parameter set receives one generated `run_id` across all selected dates.
 uses `run_id` as its key. Non-trading days are `SKIPPED`; failed dates continue;
 one final CSV aggregates all persisted processed rows for the `run_id`. The
 schema is rebuilt without retaining old data when its fields or keys do not
-match `backtest_run_statistics_v1`.
+match `backtest_run_statistics_v2`.
 
 ## 6.1 目标
 

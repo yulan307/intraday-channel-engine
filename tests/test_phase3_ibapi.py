@@ -134,7 +134,7 @@ def test_nonconforming_schema_is_cleared_once(tmp_path) -> None:
     path = tmp_path / "legacy.sqlite3"
     sqlite3.connect(path).execute("CREATE TABLE raw_1m_bar (timestamp TEXT)").connection.commit()
     database = Database(path); database.initialize()
-    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "backtest_run_statistics_v1"
+    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "backtest_run_statistics_v2"
 
 
 def test_previous_phase3_schema_is_cleared_once_and_recreated(tmp_path) -> None:
@@ -148,9 +148,10 @@ def test_previous_phase3_schema_is_cleared_once_and_recreated(tmp_path) -> None:
     database.connection.commit()
     database.initialize()
     assert database.connection.execute("SELECT COUNT(*) FROM raw_1m_bar").fetchone()[0] == 0
-    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "backtest_run_statistics_v1"
+    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "backtest_run_statistics_v2"
     columns = {row[1] for row in database.connection.execute("PRAGMA table_info(processed_1m_bar)")}
-    assert {"date", "timestamp", "wap", "bar_count", "bar_size", "what_to_show", "use_rth", "source", "trend_slope", "channel_pred_high", "decision_triggered"} <= columns
+    assert {"date", "timestamp", "wap", "bar_count", "bar_size", "what_to_show", "use_rth", "source", "trend_slope", "channel_window", "channel_pred_high", "decision_triggered"} <= columns
+    assert not {"slope_std_window", "dev_window", "residual_window"} & columns
     assert not any(column.lower().endswith("_et") or column.lower() == "et" for column in columns)
     assert "initial_threshold" not in columns
     assert not {"parameter_snapshot_json", "trend_json", "channel_json", "decision_json"} & columns
@@ -163,8 +164,8 @@ def test_processed_run_csv_uses_the_processed_table_fields(tmp_path) -> None:
     timestamp = datetime(2025, 1, 15, 10, 0, tzinfo=ET)
     record = ProcessedBarRecord(
         "run-1", "AAPL", date(2025, 1, 15), timestamp, RunMode.BACKTEST, BarSource.HIST,
-        Direction.BUY, "params", {"trend_window": 30, "slope_std_window": 5, "dev_window": 5,
-        "residual_window": 5, "r2_threshold": 0.5, "channel_high_percentile": 95.0,
+        Direction.BUY, "params", {"trend_window": 30, "channel_window": 5,
+        "r2_threshold": 0.5, "channel_high_percentile": 95.0,
         "channel_low_percentile": 5.0, "continuous_break_count": 3, "is_active": 1}, 0.0,
         100.0, 101.0, 99.0, 100.5, 10.0, 100.25, 3,
         TrendResult(100.5, 0.1, 0.9, 0.01, 0.02, True, TrendLabel.UP, 30),
@@ -202,13 +203,13 @@ def test_terminal_daily_statistics_and_scan_summary_use_persisted_prices(tmp_pat
     database = Database(tmp_path / "statistics.sqlite3")
     database.initialize()
     repositories = SqliteRepositories(database)
-    params = ParameterSet("p1", 3, 3, 1, 1, 0.8, 95.0, 95.0, 1, 1)
+    params = ParameterSet("p1", 3, 3, 0.8, 95.0, 95.0, 1, 1)
     started = datetime(2025, 1, 15, 9, 0, tzinfo=ET)
     context = RunContext("run-1", "AAPL", date(2025, 1, 15), params, Direction.BUY, ThresholdMode.FIXED, 100.0, RunMode.BACKTEST, None, started)
     repositories.create(context)
     base = ProcessedBarRecord(
         "run-1", "AAPL", context.trade_date, datetime(2025, 1, 15, 9, 30, tzinfo=ET), RunMode.BACKTEST, BarSource.HIST,
-        Direction.BUY, "p1", {"trend_window": 3, "slope_std_window": 3, "dev_window": 1, "residual_window": 1,
+        Direction.BUY, "p1", {"trend_window": 3, "channel_window": 3,
         "r2_threshold": 0.8, "channel_high_percentile": 95.0, "channel_low_percentile": 95.0, "continuous_break_count": 1}, 100.0,
         100.0, 101.0, 99.0, 100.0, 1.0, 100.0, 1,
         TrendResult(100.0, None, None, None, None, None, None, 1),
