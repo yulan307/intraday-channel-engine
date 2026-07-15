@@ -108,13 +108,14 @@ def test_runtime_statistics_returns_null_reward_for_zero_price(best_price: float
 
 
 class _SignalTrendEngine:
-    def __init__(self, price: float) -> None:
+    def __init__(self, price: float, slope: float) -> None:
         self.price = price
+        self.slope = slope
 
     def update(self, bar: CompletedBar, state: TrendState, params: ParameterSet) -> tuple[TrendResult, TrendState]:
         next_state = TrendState.empty(params)
         next_state.bars.append(TrendBar(bar.raw.timestamp_et, self.price))
-        return TrendResult(self.price, None, None, None, None, None, None, 1), next_state
+        return TrendResult(self.price, self.slope, None, None, 0.5, None, None, 1), next_state
 
 
 class _SignalChannelEngine:
@@ -150,7 +151,7 @@ def test_auto_signal_updates_threshold_and_resets_trend_and_channel_for_next_bar
         context,
         _bar(3, price),
         state,
-        _SignalTrendEngine(price),
+        _SignalTrendEngine(price, 1.0 if direction is Direction.BUY else -1.0),
         _SignalChannelEngine(pred_high, pred_low),
         DecisionEngine(),
     )
@@ -183,7 +184,7 @@ def test_auto_signal_applies_directional_threshold_update_rate(
     )
     transition = process_bar(
         context, _bar(3, 105.0), RuntimeState.empty(params, 110.0 if direction is Direction.BUY else 100.0),
-        _SignalTrendEngine(105.0), _SignalChannelEngine(pred_high, pred_low), DecisionEngine(),
+        _SignalTrendEngine(105.0, 1.0 if direction is Direction.BUY else -1.0), _SignalChannelEngine(pred_high, pred_low), DecisionEngine(),
     )
 
     assert transition.record.decision.triggered
@@ -197,7 +198,7 @@ def test_fixed_signal_preserves_trend_and_channel_state() -> None:
         context,
         _bar(3, 105.0),
         RuntimeState.empty(params, 110.0),
-        _SignalTrendEngine(105.0),
+        _SignalTrendEngine(105.0, 1.0),
         _SignalChannelEngine(100.0, None),
         DecisionEngine(),
     )

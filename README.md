@@ -135,10 +135,10 @@ selects exactly that row regardless of activity.
 
 Auto Threshold resets each date, initializes from the first completed Bar's
 raw `open`, and updates after a triggered BUY or SELL for the next Bar.
-BUY requires both the existing price/`pred_high` breakout condition and an
-`effective_trend` of `UP` or `SIDEWAY`. SELL requires the existing
-price/`pred_low` breakout condition and an `effective_trend` of `DOWN` or
-`SIDEWAY`. Signal post-processing is unchanged.
+BUY requires both the existing price/`pred_high` breakout condition and
+`trend_slope >= trend_slope_std`. SELL requires the existing price/`pred_low`
+breakout condition and `trend_slope <= -trend_slope_std`. Missing slope values
+produce no signal. Signal post-processing is unchanged.
 `threshold_update_rate` is a 0-100 percentage. With a numeric threshold, a
 numeric rate (including `0`) enables Auto and uses that threshold as the
 initial value; null or omission keeps Fixed mode. A null threshold remains

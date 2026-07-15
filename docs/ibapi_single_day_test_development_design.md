@@ -1441,7 +1441,8 @@ class DecisionEngine:
         active_threshold: float,
         pred_high: float | None,
         pred_low: float | None,
-        effective_trend: TrendLabel | None,
+        trend_slope: float | None,
+        trend_slope_std: float | None,
         state: DecisionState,
         params: ParameterSet,
     ) -> DecisionTransition:
@@ -1471,7 +1472,10 @@ def evaluate_buy(...):
     if pred_high is None:
         return no_buy_with_reset()
 
-    if effective_trend not in (TrendLabel.UP, TrendLabel.SIDEWAY):
+    if trend_slope is None or trend_slope_std is None:
+        return no_buy_with_reset()
+
+    if trend_slope < trend_slope_std:
         return no_buy_with_reset()
 
     if price >= active_threshold:
@@ -1506,7 +1510,10 @@ def evaluate_sell(...):
     if pred_low is None:
         return no_sell_with_reset()
 
-    if effective_trend not in (TrendLabel.DOWN, TrendLabel.SIDEWAY):
+    if trend_slope is None or trend_slope_std is None:
+        return no_sell_with_reset()
+
+    if trend_slope > -trend_slope_std:
         return no_sell_with_reset()
 
     if price <= active_threshold:
@@ -2332,11 +2339,15 @@ percentile 使用 method='linear'
 
 ```text
 BUY pred_high null -> NO_BUY / count 0
-BUY effective_trend not UP or SIDEWAY -> NO_BUY / count 0
+BUY slope or slope_std null -> NO_BUY / count 0
+BUY slope < slope_std -> NO_BUY / count 0
 BUY price >= threshold -> reset
 BUY price <= pred_high -> reset
 BUY 连续突破递增
 BUY 达到阈值触发并生成 post-persist count 0
+
+SELL slope or slope_std null -> NO_SELL / count 0
+SELL slope > -slope_std -> NO_SELL / count 0
 
 SELL 对称逻辑
 同一 run 可多次触发
