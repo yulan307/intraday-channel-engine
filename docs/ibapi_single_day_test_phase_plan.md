@@ -286,10 +286,9 @@ Channel 回归：
 
 ### Decision
 
-BUY additionally requires `effective_trend` to be `UP` or `SIDEWAY`; SELL
-additionally requires `effective_trend` to be `DOWN` or `SIDEWAY`. A missing
-or opposite effective trend produces no signal. Signal post-processing is
-unchanged.
+BUY additionally requires `trend_slope >= trend_slope_std`; SELL additionally
+requires `trend_slope <= -trend_slope_std`. A missing slope or slope standard
+deviation produces no signal. Signal post-processing is unchanged.
 
 ```text
 BUY / SELL 对称

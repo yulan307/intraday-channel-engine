@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from single_day_test.domain.enums import DecisionLabel, Direction, TrendLabel
+from single_day_test.domain.enums import DecisionLabel, Direction
 from single_day_test.domain.models import DecisionResult
 from single_day_test.domain.parameters import ParameterSet
 from single_day_test.domain.states import DecisionState
@@ -22,7 +22,8 @@ class DecisionEngine:
         active_threshold: float,
         pred_high: float | None,
         pred_low: float | None,
-        effective_trend: TrendLabel | None,
+        trend_slope: float | None,
+        trend_slope_std: float | None,
         state: DecisionState,
         params: ParameterSet,
     ) -> DecisionTransition:
@@ -31,7 +32,9 @@ class DecisionEngine:
                 pred_high is None
                 or price >= active_threshold
                 or price <= pred_high
-                or effective_trend not in (TrendLabel.UP, TrendLabel.SIDEWAY)
+                or trend_slope is None
+                or trend_slope_std is None
+                or trend_slope < trend_slope_std
             ):
                 return self._no_decision(DecisionLabel.NO_BUY)
             return self._break_transition(DecisionLabel.BUY, state, params)
@@ -40,7 +43,9 @@ class DecisionEngine:
             pred_low is None
             or price <= active_threshold
             or price >= pred_low
-            or effective_trend not in (TrendLabel.DOWN, TrendLabel.SIDEWAY)
+            or trend_slope is None
+            or trend_slope_std is None
+            or trend_slope > -trend_slope_std
         ):
             return self._no_decision(DecisionLabel.NO_SELL)
         return self._break_transition(DecisionLabel.SELL, state, params)
