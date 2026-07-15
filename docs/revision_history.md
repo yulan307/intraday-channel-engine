@@ -1,5 +1,7 @@
 # Revision History
 
+| 2026-07-15 | `tests/test_live_cli_status.py` | Made the invalid-date CLI regression test derive its temporary configuration from the tracked live YAML sample and use the tracked parameter-set sample, avoiding dependence on local runtime configuration files. | Sample YAML and CSV files were not modified. |
+
 | 2026-07-15 | `engine/channel_engine.py` and Channel engine tests | Added delayed oldest-prefix selection for `curr_*` calculation. The delay is `trend_window // 2`; after the warmup ranges, the calculation uses `channel_stack[:n-delay]` while the stack remains capped by `channel_window`. | Updated CONTEXT and current Channel flow/development documentation. |
 
 | 2026-07-15 | `engine/decision_engine.py`, `application/bar_processor.py`, and Decision/Phase 3 tests | Added effective-trend gating to BUY/SELL generation. BUY now also requires UP or SIDEWAY; SELL requires DOWN or SIDEWAY. Existing signal post-processing remains unchanged. | Updated README, CONTEXT, and current Decision Engine flow/development documentation. |
