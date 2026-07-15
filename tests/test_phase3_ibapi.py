@@ -134,7 +134,7 @@ def test_nonconforming_schema_is_cleared_once(tmp_path) -> None:
     path = tmp_path / "legacy.sqlite3"
     sqlite3.connect(path).execute("CREATE TABLE raw_1m_bar (timestamp TEXT)").connection.commit()
     database = Database(path); database.initialize()
-    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "backtest_run_statistics_v2"
+    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "backtest_csv_statistics_v1"
 
 
 def test_previous_phase3_schema_is_cleared_once_and_recreated(tmp_path) -> None:
@@ -148,7 +148,7 @@ def test_previous_phase3_schema_is_cleared_once_and_recreated(tmp_path) -> None:
     database.connection.commit()
     database.initialize()
     assert database.connection.execute("SELECT COUNT(*) FROM raw_1m_bar").fetchone()[0] == 0
-    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "backtest_run_statistics_v2"
+    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "backtest_csv_statistics_v1"
     columns = {row[1] for row in database.connection.execute("PRAGMA table_info(processed_1m_bar)")}
     assert {"date", "timestamp", "wap", "bar_count", "bar_size", "what_to_show", "use_rth", "source", "trend_slope", "channel_window", "channel_pred_high", "decision_triggered"} <= columns
     assert not {"slope_std_window", "dev_window", "residual_window"} & columns
@@ -172,14 +172,12 @@ def test_processed_run_csv_uses_the_processed_table_fields(tmp_path) -> None:
         ChannelResult(None, None, TrendLabel.UP, None, None, None, None, None, 0.1, 100.0, 95.0, 5.0, 30),
         DecisionResult(DecisionLabel.BUY, 3, True),
     )
-    with database.transaction():
-        repositories.insert(record)
-        repositories.insert(replace(
-            record,
-            timestamp_et=timestamp + timedelta(minutes=1),
-            decision=DecisionResult(DecisionLabel.NO_BUY, 0, False),
-        ))
-    path = repositories.export_processed_run_csv("run-1", tmp_path / "data")
+    records = [record, replace(
+        record,
+        timestamp_et=timestamp + timedelta(minutes=1),
+        decision=DecisionResult(DecisionLabel.NO_BUY, 0, False),
+    )]
+    path = repositories.export_processed_run_csv("run-1", records, tmp_path / "data")
     with path.open(newline="", encoding="utf-8") as stream:
         rows = list(csv.DictReader(stream))
     columns = [column[1] for column in database.connection.execute("PRAGMA table_info(processed_1m_bar)")]
@@ -188,15 +186,7 @@ def test_processed_run_csv_uses_the_processed_table_fields(tmp_path) -> None:
     assert rows[0]["run_id"] == "run-1"
     assert rows[0]["timestamp"] == "2025-01-15T10:00:00-05:00"
     assert [row["decision"] for row in rows] == ["BUY", ""]
-    stored = database.connection.execute(
-        "SELECT decision FROM processed_1m_bar WHERE run_id='run-1' ORDER BY date"
-    ).fetchall()
-    assert [row["decision"] for row in stored] == ["BUY", None]
-    decision_column = next(
-        row for row in database.connection.execute("PRAGMA table_info(processed_1m_bar)")
-        if row[1] == "decision"
-    )
-    assert decision_column[3] == 0
+    assert database.connection.execute("SELECT COUNT(*) FROM processed_1m_bar WHERE run_id='run-1'").fetchone()[0] == 0
 
 
 def test_terminal_daily_statistics_and_scan_summary_use_persisted_prices(tmp_path) -> None:
@@ -217,17 +207,13 @@ def test_terminal_daily_statistics_and_scan_summary_use_persisted_prices(tmp_pat
         DecisionResult(DecisionLabel.NO_BUY, 0, False),
     )
     second = replace(base, timestamp_et=datetime(2025, 1, 15, 9, 31, tzinfo=ET), trend=TrendResult(90.0, None, None, None, None, None, None, 1), decision=DecisionResult(DecisionLabel.BUY, 1, True))
-    with database.transaction():
-        repositories.insert(base)
-        repositories.insert(second)
-        repositories.insert(SignalEvent("run-1", second.timestamp_et, DecisionLabel.BUY, 90.0, 1))
-    summary = RunSummary("run-1", "AAPL", context.trade_date, RunMode.BACKTEST, Direction.BUY, "p1", {}, 2, 1, RunStatus.COMPLETED, started, datetime(2025, 1, 15, 16, 0, tzinfo=ET), None, None)
+    summary = RunSummary("run-1", "AAPL", context.trade_date, RunMode.BACKTEST, Direction.BUY, "p1", {}, 2, 1, RunStatus.COMPLETED, started, datetime(2025, 1, 15, 16, 0, tzinfo=ET), None, None, 100.0, 90.0, 90.0, 1.0, 1.0)
     repositories.complete_with_summary(summary)
-    daily = database.connection.execute("SELECT first_threshold, signal_count, best_price, best_order_price, best_reward, efficiency FROM single_day_run").fetchone()
-    assert tuple(daily) == pytest.approx((100.0, 1, 90.0, 90.0, 10.0, 10.0))
-    aggregate = database.connection.execute("SELECT run_id, processed_bar_count, signal_count, avg_signal_count_per_day, avg_best_reward_per_day, avg_efficiency_per_day FROM run_summary").fetchone()
+    daily = database.connection.execute("SELECT first_threshold, processed_bar_count, signal_count, best_price, best_order_price, best_reward, efficiency FROM single_day_run").fetchone()
+    assert tuple(daily) == pytest.approx((100.0, 2, 1, 90.0, 90.0, 1.0, 1.0))
+    aggregate = database.connection.execute("SELECT run_id, processed_bar_count, signal_count, avg_signal_count_per_day, avg_best_reward_per_day, avg_efficiency_per_day, max_signal_count_per_day, max_best_reward_per_day, max_efficiency_per_day FROM run_summary").fetchone()
     assert aggregate["run_id"] == "run-1"
-    assert tuple(aggregate)[1:] == pytest.approx((2, 1, 1.0, 10.0, 10.0))
+    assert tuple(aggregate)[1:] == pytest.approx((2, 1, 1.0, 1.0, 1.0, 1, 1.0, 1.0))
 
     zero_context = RunContext("run-zero", "AAPL", context.trade_date, params, Direction.SELL, ThresholdMode.FIXED, 0.0, RunMode.BACKTEST, None, started)
     repositories.create(zero_context)

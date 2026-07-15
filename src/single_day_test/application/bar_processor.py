@@ -41,4 +41,5 @@ def process_bar(context: RunContext, bar: CompletedBar, state: RuntimeState, tre
     if context.threshold_mode is ThresholdMode.AUTO and decision.triggered:
         next_trend = TrendState.empty(context.parameter_set)
         next_channel = ChannelState.empty()
-    return BarProcessTransition(record,RuntimeState(next_trend,next_channel,next_decision,next_active_threshold,True,state.processed_bar_count+1,[*state.signal_events,*([event] if event else [])]),event)
+    statistics = state.statistics.record(active_threshold, trend.price, event.price if event else None, context.direction)
+    return BarProcessTransition(record,RuntimeState(next_trend,next_channel,next_decision,next_active_threshold,True,state.processed_bar_count+1,[*state.signal_events,*([event] if event else [])],statistics),event)

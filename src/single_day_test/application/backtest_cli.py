@@ -17,7 +17,7 @@ from ..bar_feed.bar_validation import validate_complete_backtest_day
 from ..bar_feed.base import BarFeed
 from ..domain.enums import Direction, RunMode, ThresholdMode
 from ..domain.errors import InputValidationError, NonTradingDayError
-from ..domain.models import RunContext, RunSummary
+from ..domain.models import ProcessedBarRecord, RunContext, RunSummary
 from ..domain.parameters import ParameterSet, load_parameter_sets
 from ..domain.states import RuntimeState
 from ..ib.config import IbConfig
@@ -94,6 +94,7 @@ class BacktestScanner:
             run_id = self.id_generator.new_run_id(
                 self.started_at_local, request.symbol, params.parameter_set_id
             )
+            records: list[ProcessedBarRecord] = []
             for trade_date in request.trade_dates:
                 context = RunContext(
                     run_id, request.symbol, trade_date, params, request.direction,
@@ -126,11 +127,11 @@ class BacktestScanner:
                         logger.error("run_failed", run_id=run_id, error_type=type(exc).__name__, error_message=str(exc))
                     continue
                 try:
-                    summaries.append(runner.execute_run(context, feed, state, create_run=False, write_run_summary=False))
+                    summaries.append(runner.execute_run(context, feed, state, create_run=False, write_run_summary=False, processed_record_collector=records.append))
                 except Exception:
                     continue
             self.repositories.save_run_summary(run_id)
-            self.repositories.export_processed_run_csv(run_id, self.output_dir)
+            self.repositories.export_processed_run_csv(run_id, records, self.output_dir)
         return summaries
 
 

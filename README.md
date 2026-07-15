@@ -80,7 +80,7 @@ session begins, it prints and logs `session_waiting` immediately and then at
 one-hour, fifteen-minute, one-minute, or one-second intervals as the remaining
 time crosses the one-hour, ten-minute, and ten-second boundaries.
 
-`processed_1m_bar` preserves the Phase 3 v5 column shape except for the
+Live `processed_1m_bar` preserves the Phase 3 v5 column shape except for the
 removed `initial_threshold` column. It keeps all RawBar, request-provenance,
 parameter, Trend, Channel, and Decision fields as queryable columns.
 `active_threshold` is nullable and records the threshold actually used by the
@@ -100,20 +100,24 @@ same `run_id` covers all dates for that parameter set. Daily `single_day_run`
 records use `(run_id, trade_date)`, while `run_summary` has one scan-level row
 keyed by `run_id`. Non-trading dates are recorded as `SKIPPED`; failed dates
 are recorded as `FAILED` and later dates continue. One multi-day CSV is
-exported at `data/<run_id>.csv` after all dates have been attempted; partial
-rows written before a failed date remain included.
+exported at `data/<run_id>.csv` after all dates have been attempted. Backtest
+retains processed Bars in memory and writes no `processed_1m_bar` SQLite rows;
+partial rows from a failed date remain included. Live retains SQLite processed-
+Bar auditing.
 
 Each raw Bar also stores an ET, zone-aware, minute-rounded `timestamp` beside
 its canonical IBAPI epoch `date`. At each terminal daily run, `single_day_run`
 stores the actual first threshold, triggered signal count, and direction-aware
 best `trend_price` / signal price. BUY selects minima and SELL selects maxima.
 No-signal days store zero signals and null price, reward, and efficiency
-statistics. `best_reward` is the percentage distance between the best signal
-price and first threshold; `efficiency` is that reward divided by signal count.
+statistics. `best_reward` is a clamped 0-1 symmetric relative proximity between
+the best signal price and best `trend_price`; `efficiency` is that reward
+divided by signal count.
 For each `run_id`, `run_summary` stores total processed Bars and signals plus
 the average signal count, reward, and efficiency over completed days that
-processed Bars. Reward and efficiency averages exclude no-signal days. A failed
-day makes the scan summary `FAILED`; skipped days do not.
+processed Bars. Reward and efficiency averages exclude no-signal days. It also
+stores maximum daily signal count, reward, and efficiency. A failed day makes
+the scan summary `FAILED`; skipped days do not.
 
 Backtest startup defaults are stored in the local, ignored `configs/backtest.yaml`.
 Use `configs/backtest_config_sample.yaml` as the tracked setup template when
@@ -141,7 +145,7 @@ pre-reset calculation. Fixed Threshold never changes or resets either state.
 
 The tracked parameter template is `configs/parameter_set_sample.csv`; the runtime
 `configs/parameter_set.csv` is local and ignored. The database schema is
-`backtest_run_statistics_v2`. During initialization, any
+`backtest_csv_statistics_v1`. During initialization, any
 nonconforming Phase 3 table shape causes the complete Phase 3 database to be
 cleared and recreated; no old data is migrated or retained.
 

@@ -220,6 +220,11 @@ class RunSummary:
     ended_at_et: datetime
     error_type: str | None
     error_message: str | None
+    first_threshold: float | None = None
+    best_price: float | None = None
+    best_order_price: float | None = None
+    best_reward: float | None = None
+    efficiency: float | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "started_at_et", _normalize_dt(self.started_at_et))

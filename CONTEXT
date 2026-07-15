@@ -12,12 +12,12 @@ Implemented scope:
 
 - Raw market data remains canonical IBAPI-shaped data: UTC epoch `date`, OHLC,
   `volume`, `wap`, and `barCount`. Historical RTH data is cached in SQLite.
-- `processed_1m_bar` keeps Phase 3 v5 fields and order except for removed
+- Live `processed_1m_bar` keeps Phase 3 v5 fields and order except for removed
   `initial_threshold`. `active_threshold` is nullable and means the threshold
   used for the current Bar decision. Its `decision` value is null when no
   signal triggers, and otherwise is `BUY` or `SELL`. There are no JSON payload
   columns and no persisted `_et` columns.
-- The SQLite schema is `backtest_run_statistics_v2`. Initialization verifies its shape;
+- The SQLite schema is `backtest_csv_statistics_v1`. Initialization verifies its shape;
   any incompatible Phase 3 tables are cleared and recreated together. Existing
   data is intentionally not migrated or retained.
 - Backtest startup is YAML-first through the local `configs/backtest.yaml`; the
@@ -46,14 +46,19 @@ Implemented scope:
   Auto Threshold update resets Trend and Channel state for that next Bar; the
   signal Bar retains its pre-reset calculations.
 - `single_day_run` records `threshold_update_rate`, the actual first threshold,
-  signal count, and direction-aware daily best-price/reward/efficiency metrics.
+  processed-Bar count, signal count, and direction-aware daily
+  best-price/reward/efficiency metrics. Reward is a clamped 0-1 symmetric
+  relative proximity between the best signal price and best `trend_price`.
   It uses `(run_id, trade_date)` keys. `run_summary` has one scan-level row per
   `run_id`, with total counts plus averages across completed days that processed
-  Bars. No-signal days contribute zero to average signal count and are excluded
-  from reward and efficiency averages.
+  Bars. It also records maximum daily signal count, reward, and efficiency.
+  No-signal days contribute zero to average signal count and are excluded from
+  reward and efficiency averages.
   Non-trading days are `SKIPPED`; failures are `FAILED`; later dates continue.
   Partial processed rows from failed dates remain in the one multi-day
-  `data/<run_id>.csv` export. `raw_1m_bar` retains the canonical IBAPI epoch
+  `data/<run_id>.csv` export. Backtest retains processed records in memory and
+  does not write `processed_1m_bar` to SQLite; Live retains SQLite processed-Bar
+  audit persistence. `raw_1m_bar` retains the canonical IBAPI epoch
   `date` and also persists an ET-aware, minute-rounded ISO `timestamp`.
 
 Excluded scope:

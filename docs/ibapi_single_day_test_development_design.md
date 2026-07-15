@@ -711,7 +711,7 @@ spans all dates for one parameter set. Daily `single_day_run` records use
 `(run_id, trade_date)` keys; `run_summary` has one scan-level row per `run_id`.
 Non-trading dates are `SKIPPED`, failures are `FAILED`, later dates continue,
 and one CSV is exported for the run. Incompatible SQLite schemas are rebuilt as
-`backtest_run_statistics_v2` without retaining old data.
+`backtest_csv_statistics_v1` without retaining old data.
 
 Fixed Threshold remains unchanged. Auto Threshold resets every date,
 initializes from the first completed Bar raw `open`, and updates after a
@@ -1806,6 +1806,7 @@ ended_at_epoch          INTEGER NULL
 error_type              TEXT NULL
 error_message           TEXT NULL
 first_threshold         REAL NULL
+processed_bar_count     INTEGER NOT NULL
 signal_count            INTEGER NOT NULL
 best_price              REAL NULL
 best_order_price        REAL NULL
@@ -1816,7 +1817,7 @@ PRIMARY KEY(run_id, trade_date)
 
 ### 21.4 `processed_1m_bar`
 
-Phase 3 current-state rule: this table is fully columnar. It includes all
+Live current-state rule: this table is fully columnar. It includes all
 `RawBar` fields (`symbol`, `date`, `open`, `high`, `low`, `close`, `volume`,
 `wap`, and `bar_count`) plus raw request metadata (`bar_size`, `what_to_show`,
 `use_rth`, and `source`), run metadata, parameter snapshot columns, and
@@ -1825,9 +1826,8 @@ dedicated columns for every `TrendResult`, `ChannelResult`, and
 `decision_` prefixes. The table must not contain or persist the original
 `parameter_snapshot_json`, `trend_json`, `channel_json`, or `decision_json`.
 
-The schema version is `phase3_ibapi_v5`. Existing `phase3_ibapi_v1`,
-`phase3_ibapi_v2`, `phase3_ibapi_v3`, and `phase3_ibapi_v4` data is
-cleared once during initialization rather than migrated.
+Backtest does not persist rows in this table. It keeps the same complete row
+shape in memory and exports one CSV per run ID after its scan completes.
 
 Timestamp naming rule: persisted database columns do not use the `_et`
 suffix. Runtime aware datetimes normalized to `America/New_York` may use
@@ -1839,10 +1839,9 @@ The `timestamp` column stores the `America/New_York` bar timestamp at
 `bar_size` precision; Phase 3 uses `1 min`, with zero seconds and microseconds.
 The raw UTC epoch remains in `date`.
 
-At run completion, export the rows for that `run_id` to `data/<run_id>.csv`.
-The CSV header and field order are derived from `processed_1m_bar`, so they
-match the SQLite schema exactly. The export does not replace or delete SQLite
-data.
+At Backtest run completion, export the in-memory rows for that `run_id` to
+`data/<run_id>.csv`. The CSV header and field order match this SQLite schema
+exactly. Live does not export or delete SQLite processed-Bar data.
 
 建议将 Trend、Channel、Decision 字段直接展开为列，便于回测查询和绘图。
 
@@ -1885,6 +1884,9 @@ signal_count            INTEGER NOT NULL
 avg_signal_count_per_day REAL NULL
 avg_best_reward_per_day  REAL NULL
 avg_efficiency_per_day   REAL NULL
+max_signal_count_per_day INTEGER NULL
+max_best_reward_per_day  REAL NULL
+max_efficiency_per_day   REAL NULL
 
 started_at_et           TIMESTAMP NOT NULL
 ended_at_et             TIMESTAMP NOT NULL
@@ -2601,19 +2603,26 @@ only after an observed exception is reviewed.
 
 ## 30. Current run statistics storage
 
-The database schema is `backtest_run_statistics_v2` and is deliberately rebuilt
+The database schema is `backtest_csv_statistics_v1` and is deliberately rebuilt
 when its shape differs. `raw_1m_bar.timestamp` is a minute-rounded,
 America/New_York-aware ISO timestamp in addition to the canonical IBAPI epoch
 `date`.
 
 `single_day_run` is the daily statistics record. It persists the first actual
-threshold, triggered signal count, and direction-aware best persisted
-`trend_price` and signal-event price. BUY selects minima and SELL selects
-maxima. No-signal days leave price/reward/efficiency null; reward and efficiency
-are also null when the first threshold is zero.
+threshold, processed-Bar count, triggered signal count, and direction-aware
+best `trend_price` and signal-event price. BUY selects minima and SELL selects
+maxima. `best_reward` is the clamped 0-1 symmetric relative proximity
+`1 - abs(best_order_price - best_price) / abs(best_order_price + best_price)`.
+No-signal days and zero denominators leave price/reward/efficiency null.
+
+Backtest does not persist `processed_1m_bar` to SQLite. It holds each accepted
+processed record in memory for one `run_id` and writes one full-schema CSV after
+the scan finishes, retaining partial rows from failed dates. Live retains its
+SQLite processed-Bar audit path. Backtest retains SQLite `signal_event` rows.
 
 `run_summary` is a scan-level table keyed by `run_id`, not a daily table. It
-stores aggregate processed Bar/signal totals and averages over completed dates
-that processed Bars. Zero-signal dates count toward average signal count but
-are excluded from reward and efficiency averages. A failed daily run makes the
-aggregate status FAILED; skipped dates do not.
+stores aggregate processed Bar/signal totals, daily averages, and maximum daily
+signal count/reward/efficiency over completed dates that processed Bars.
+Zero-signal dates count toward average and maximum signal count but are excluded
+from reward and efficiency aggregates. A failed daily run makes the aggregate
+status FAILED; skipped dates do not.
