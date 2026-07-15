@@ -1,4 +1,4 @@
-# Phase 5 Live Paper startup defaults.
+# Phase 7 Live Paper startup defaults.
 # Run without strategy arguments to use this file:
 #   python -m single_day_test.application.live_cli
 # Every explicitly supplied CLI option overrides its matching value below.
@@ -22,8 +22,11 @@ parameter_set_path: configs/parameter_set.csv
 parameter_set_id: mu-phase3-v4
 
 # Selects the paper or live connection profile from configs/ib.yaml.
-# It changes the TWS endpoint only; Phase 5 never places orders.
+# It changes the TWS endpoint. The operator is responsible for selecting paper/live.
 ib_environment: paper
+
+# Required order sizes. One normally returned placeOrder consumes one value.
+shares: [1]
 
 # Optional ET trading date in YYYY-MM-DD format.
 # null selects today, or the next tradable session after today's close.

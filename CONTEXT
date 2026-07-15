@@ -85,8 +85,9 @@ continues the run; other fetch, validation, persistence, and final-Bar timeout
 errors remain terminal.
 
 The Phase 5 automated suite uses fake clocks and feeds. A real-TWS full-day
-test is deferred to the user. Orders, recovery, checkpointing, performance
-ranking, and scan-level summary remain excluded.
+test is deferred to the user. Backtest order submission, acknowledgements,
+fills, positions, funds, holdings, duplicate-order handling, reconciliation,
+checkpointing, performance ranking, and scan-level summary remain excluded.
 
 Live startup configuration is YAML-first. The local `configs/live_config.yaml`
 supplies
@@ -118,3 +119,22 @@ terminal summary remain recorded. All IBAPI error callbacks retain request ID,
 code, message, callback time, and optional advanced rejection JSON. A matching
 live request error wakes the feed and fails the run. Live starts a terminal-only
 heartbeat every five minutes after its first confirmed Bar.
+
+Phase 7 is implemented for Live only. `ib.yaml` profiles use separate
+`market_client_id` and `order_client_id` values. The Live YAML requires a
+non-empty `shares` list of positive integers; `--shares` replaces it and
+accepts comma- or whitespace-separated values. The order gateway retries three
+times at startup, discovers exactly one IBAPI managed account, and uses it in
+`MKT` / `DAY` / `SMART` / `USD` orders. It retries a post-first-Bar disconnect
+three times and one more time before an eligible submission. A normal
+`placeOrder` return consumes one share entry; no broker acknowledgement or
+fill/status tracking is performed.
+
+LivePaperFeed now defers source classification. The Runner classifies at
+consumption time and persists the same `HIST` / `LIVE` / `END` value; only
+`LIVE` signals submit. It submits before SQLite persistence. Before the first
+successfully persisted Bar all errors are fatal. Afterwards non-fatal errors
+log and skip the current Bar, Feed errors clear and wait for a callback, and a
+post-order SQLite error advances calculated state without retrying the Bar or
+order. Terminal summary persistence remains fatal. The configured IB endpoint
+is the operator's responsibility.

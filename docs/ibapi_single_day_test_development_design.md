@@ -2385,14 +2385,15 @@ Codex 实施时必须：
 Core Engine 保持无 IO
 每个模块同步编写单元测试
 数据库写入使用事务
-每根 Bar 保存后才提交 RuntimeState
+Phase 0–5 每根 Bar 保存后才提交 RuntimeState；Phase 7 的
+post-submission SQLite failure 按 Phase 7 规则推进已计算的 RuntimeState
 所有时间使用 America/New_York aware datetime
 ```
 
 Codex 不得自行增加：
 
 ```text
-订单模块
+未获批准的订单模块（Phase 7 已定义的 Live Paper order 模块除外）
 自动恢复
 checkpoint
 多日批处理
@@ -2533,3 +2534,66 @@ Late or duplicate completed Bars after emission are logged with their complete
 raw data and ordering context, skipped, and do not terminate the run. There
 is no order, retry, recovery, checkpoint, ranking, scan summary, or automated
 real-TWS test in this Phase.
+
+## Phase 7 Current State: Live Paper Order Submission
+
+Phase 7 is implemented only on the Live Paper application path. Backtest remains on the
+market-data connection and otherwise remains unchanged. The stateless Trend,
+Channel, and Decision engines remain IO-free and do not receive order logic.
+
+### Configuration and connection separation
+
+`configs/ib.yaml` splits each profile's former `client_id` into
+`market_client_id` and `order_client_id`. The market connection uses the former
+for historical and Live Bar data. A separate order gateway uses the latter with
+the same profile host and port. Market request IDs and order IDs are maintained
+as independent sequences.
+
+Live configuration adds required `shares`, a non-empty YAML list of positive
+integers. It is the ordered submission budget; an element is the quantity of
+one submission. Fractional shares are invalid and no maximum quantity is
+imposed. The CLI `--shares` override accepts comma-separated and
+whitespace-separated values and replaces the YAML list.
+
+On the order connection, IBAPI `managedAccounts(...)` is awaited and emitted as
+an INFO event. Exactly one returned account is required and becomes
+`Order.account`. Zero or multiple accounts terminate before the first Bar and
+before any order is sent. The order connection retries three times during
+startup and startup fails after the third failure. After the first successfully
+persisted Bar, disconnection retries three times and then leaves the Live loop
+running. A later eligible submission gets one additional reconnect attempt;
+failure is logged without terminating the process.
+
+### Consumer-time source and order boundary
+
+`LivePaperFeed` continues to buffer and validate completed raw Bars, but does
+not make the final `HIST` / `LIVE` classification. At consumption, the Runner
+uses the existing injected-clock rule: the final session Bar remains `END`; the
+preceding current-minute Bar is `LIVE`; earlier Bars are `HIST`. This one result
+controls both `processed_1m_bar.bar_source` and order eligibility.
+
+The Runner processes the Bar through the existing engines. If Decision triggers
+`BUY` or `SELL`, the consumer-time source is `LIVE`, and a `shares` entry
+remains, it constructs a stock order with the matching action, `MKT`, `DAY`,
+`SMART`, `USD`, discovered account, and current quantity. It calls
+`placeOrder(...)` before persisting the processed Bar and signal event.
+
+A normally returning `placeOrder(...)` call immediately consumes the quantity;
+the phase does not wait for or inspect `openOrder`, `orderStatus`, executions,
+or fills. A local exception from that call leaves the entry available. There is
+no funds, holdings, position, order-state, duplicate-order, or reconciliation
+logic.
+
+### Persistence and error boundary
+
+After submission handling, the Runner persists the processed Bar and any signal
+event. If that SQLite write fails after a submission, it logs the failure,
+advances to the already calculated RuntimeState, and skips to the next Bar; it
+does not retry the Bar or order.
+
+Until the first Bar has persisted successfully, every error is fatal and is
+raised. Afterwards, non-fatal errors are logged, the current Bar is skipped,
+and processing continues. A Feed error in this later period is cleared before
+waiting for the next callback, without resubscribing. Repeated records of a
+persistent non-fatal error are allowed. New fatal categories are determined
+only after an observed exception is reviewed.

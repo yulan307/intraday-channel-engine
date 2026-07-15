@@ -476,7 +476,52 @@ LIVE Bar
     才允许在 Decision 满足条件后进入下单模块
 ```
 
-当前阶段尚未接入下单，因此 `HIST/LIVE` 只作为来源字段保存。
+Phase 5 当前态尚未接入下单，因此 `HIST/LIVE` 只作为来源字段保存；下面的
+Phase 7 规则在其实现后取代这一限制。
+
+## Phase 7 Flow: Live Paper Order Submission
+
+Phase 7 moves the final `HIST` / `LIVE` decision from Feed output to Runner
+consumption. The rule itself is unchanged and uses the injected clock at the
+time the Bar is handed to the consumer: the final session Bar is `END`, the
+preceding current-minute Bar is `LIVE`, and earlier Bars are `HIST`. The same
+result is persisted as `processed_1m_bar.bar_source` and controls whether an
+order may be submitted.
+
+```mermaid
+flowchart TD
+    A["Live CLI"] --> B["Market Gateway<br/>market_client_id"]
+    A --> C["Order Gateway<br/>order_client_id"]
+    C --> D["managedAccounts()"]
+    D -->|"exactly one account"| E["Order.account"]
+    D -->|"zero or multiple accounts"| X["Terminate before first Bar"]
+    B --> F["LivePaperFeed<br/>completed raw Bar"]
+    F --> G["Runner consumes Bar<br/>classifies HIST/LIVE/END using current clock"]
+    G --> H["Trend -> Channel -> Decision"]
+    H --> I{"LIVE source + BUY/SELL + shares remain?"}
+    I -->|"No"| L["Persist processed Bar / signal"]
+    I -->|"Yes"| J["Build MKT DAY SMART USD order"]
+    J --> K["placeOrder()"]
+    K -->|"returns"| L
+    K -->|"local exception"| M["Log; retain shares entry"]
+    M --> L
+    L -->|"success"| N["Advance RuntimeState"]
+    L -->|"SQLite error after submission"| O["Log; advance calculated RuntimeState; skip Bar"]
+```
+
+The Live YAML `shares` list is required and contains positive integer
+quantities. CLI `--shares` replaces it and accepts comma or whitespace
+separators. A normally returning `placeOrder()` consumes the current entry;
+there is no order acknowledgement, fill, status, funds, holdings, or position
+check.
+
+Before the first Bar is successfully persisted, every error is raised. After
+that boundary, non-fatal errors log and skip the current Bar. A Feed error is
+cleared and waits for the next callback without resubscription; repeated logs
+are allowed. Order connection startup retries three times and then terminates;
+after the first persisted Bar, disconnection retries three times and continues,
+and a later submission performs one final reconnect attempt before logging and
+skipping on failure.
 
 ### 9.3 实时 Bar 完成条件
 

@@ -62,7 +62,7 @@ checkpoint
 | Phase 4 | Live Paper 行情接入 | 是 | 实现历史补齐、实时订阅、Queue |
 | Phase 5 | 单日 Live Paper 完整闭环 | 是 | 从启动到收盘总结完整运行 |
 | Phase 6 | 稳定性与回归验收 | 部分需要 | 对比 Backtest 与 Live 模拟结果 |
-| Future Phase | Paper Order | 是 | 当前不实施，仅预留接入点 |
+| Phase 7 | Live Paper Order Submission | 是 | 对 Live `BUY`/`SELL` 信号提交虚拟账户市价单 |
 
 ---
 
@@ -1086,48 +1086,98 @@ run_id
 
 ---
 
-# Future Phase：Paper Order 接入预留
+# Phase 7：Live Paper Order Submission
 
-## 10.1 当前状态
+## 10.1 目标和范围
 
-```text
-不在本轮开发范围内
-```
+Phase 7 adds virtual-account order submission to the implemented Live Paper
+loop. It is Live-only: Backtest retains its existing behavior and uses
+`market_client_id`.
 
-## 10.2 未来 TWS 接入位置
+When the consumer-time source is `LIVE` and Decision emits `BUY` or `SELL`,
+the phase submits one matching stock `MKT` order with `DAY` time in force,
+`SMART` exchange, and `USD` currency. `HIST` and `END` Bars run the existing
+strategy and persistence flow but never submit orders.
 
-订单模块应接在：
+The Live YAML requires a non-empty `shares` list of positive integers. Each
+entry is one permitted submission quantity in order. A CLI `--shares` override
+accepts comma-separated and whitespace-separated values. No fractional shares
+or maximum quantity is supported. A successful `placeOrder(...)` call consumes
+one entry immediately; no order acknowledgement, fill, position, or funds
+check is performed. A locally raised `placeOrder(...)` exception does not
+consume the entry.
 
-```text
-DecisionEngine
--> SignalEvent 成功保存
--> OrderDecision / OrderExecution
--> IbGateway.place_order(...)
-```
+## 10.2 Connection and account contract
 
-不能把下单逻辑放入：
-
-```text
-TrendEngine
-ChannelEngine
-DecisionEngine
-LivePaperFeed
-```
-
-## 10.3 未来下单前门槛
-
-在开始 Paper Order 前，至少要求：
+Each `ib.yaml` profile splits its former `client_id` into:
 
 ```text
-1. Phase 5 完整日稳定运行。
-2. Phase 6 回归结果一致。
-3. Signal 定义固定。
-4. run_id / signal_event 唯一性稳定。
-5. TWS 连接管理稳定。
-6. 订单模块有独立状态机。
-7. HIST Bar 明确禁止触发实际订单。
-8. 只有 LIVE Bar 允许进入下单流程。
+market_client_id  # Backtest and market-data connection
+order_client_id   # separate Live order connection
 ```
+
+The two connections use the same profile host and port. Order IDs and market
+request IDs are separate sequences. On order connection, `managedAccounts(...)`
+is logged at INFO. Exactly one account is required and is set as `Order.account`.
+Zero or multiple returned accounts terminate startup without any submission.
+
+Initialization retries the unavailable order connection three times, then
+terminates if it cannot connect. After the first successfully persisted Bar,
+the runtime retries a disconnected order connection three times and continues
+if all fail. Before a later submission while still disconnected, it tries one
+further reconnect; failure is logged and does not terminate the Live loop.
+
+## 10.3 Consumer-time source, ordering, and error rules
+
+The Feed no longer makes the final `HIST` / `LIVE` classification. At the time
+the Runner consumes a Bar, it applies the existing time-based classification
+rule using the current injected clock; existing `END` behavior is unchanged.
+The resulting source is used both for order eligibility and for the persisted
+`processed_1m_bar.bar_source` value.
+
+For an eligible signal, the sequence is:
+
+```text
+consume and classify Bar
+-> process Trend / Channel / Decision
+-> submit MKT order when eligible
+-> persist processed Bar and signal event
+-> advance RuntimeState
+```
+
+If SQLite persistence fails after order submission, log the error, advance with
+the calculated RuntimeState, and continue to the next Bar. Do not retry that
+Bar or order.
+
+Until the first Bar is successfully persisted, every error is raised and ends
+the run. Afterwards, non-fatal errors are logged, the current Bar is skipped,
+and the process continues; duplicate logs for a persistent error are allowed.
+A non-fatal Feed error is cleared and the Runner waits for the next Feed
+callback without resubscribing. Fatal-error classification is intentionally
+defined only from observed exceptions and must not be inferred.
+
+## 10.4 Explicit non-goals
+
+- The configured IB environment is not restricted by this phase; endpoint
+  selection remains the operator's responsibility.
+- No Trend, Channel, or Decision algorithm change.
+- No order acknowledgement, status, execution, commission, or fill tracking.
+- No order-intent, broker-status, or fill persistence.
+- No funds, holdings, position, duplicate-order, or startup-reconciliation
+  checks.
+
+## 10.5 Phase 7 acceptance
+
+- Live `BUY` / `SELL` signals submit matching `MKT` / `DAY` orders only for
+  consumer-classified `LIVE` Bars.
+- `shares` validation and CLI override behavior are covered by tests.
+- Account discovery, separate client IDs, order-ID separation, and reconnect
+  rules are covered by fake IBAPI tests.
+- A local order-call error preserves the current `shares` entry.
+- A post-submission SQLite error advances runtime state without retrying the
+  Bar or order.
+- First-Bar failures end the run; later non-fatal Feed errors clear and wait
+  for a later callback.
 
 ---
 
@@ -1150,7 +1200,7 @@ flowchart TD
     E --> F["Phase 5<br/>完整 Live Paper 闭环"]
     F --> G["Phase 6<br/>稳定性与回归"]
 
-    G --> H["Future<br/>Paper Order"]
+    G --> H["Phase 7<br/>Live Paper Order Submission"]
 ```
 
 ---

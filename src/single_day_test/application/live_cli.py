@@ -25,6 +25,7 @@ from ..support.clock import Clock, SystemClock
 from ..support.ids import DefaultIdGenerator
 from ..support.logging import JsonLineLogger, TerminalMirrorLogger
 from .single_day_runner import SingleDayRunner
+from .live_order_submitter import LiveOrderSubmitter
 from .startup_confirmation import print_and_confirm_launch
 from .summary_service import build_failed_summary
 from .threshold_policy import parse_threshold_update_rate, resolve_config_threshold_mode
@@ -34,7 +35,7 @@ DEFAULT_LIVE_CONFIG = Path("configs/live_config.yaml")
 _LIVE_CONFIG_FIELDS = {
     "symbol", "direction", "threshold", "parameter_set_path",
     "parameter_set_id", "ib_environment", "trade_date", "threshold_update_rate",
-    "log_level",
+    "log_level", "shares",
 }
 
 
@@ -50,6 +51,7 @@ class LiveLaunchConfig:
     trade_date: date | None
     threshold_update_rate: float = 0.0
     log_level: str = "INFO"
+    shares: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -90,6 +92,7 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--database", type=Path, default=Path("data/intraday_channel.sqlite3"))
     parser.add_argument("--ib-config", type=Path, default=Path("configs/ib.yaml"))
     parser.add_argument("--ib-environment", choices=("paper", "live"))
+    parser.add_argument("--shares", nargs="+")
     parser.add_argument("--log-dir", type=Path, default=Path("data/logs"))
     return parser.parse_args()
 
@@ -111,7 +114,7 @@ def resolve_live_launch_config(args: argparse.Namespace) -> LiveLaunchConfig:
     values = load_live_config(args.config)
 
     def selected(name: str) -> object:
-        override = getattr(args, name)
+        override = getattr(args, name, None)
         return override if override is not None else values.get(name)
 
     symbol = selected("symbol")
@@ -123,6 +126,7 @@ def resolve_live_launch_config(args: argparse.Namespace) -> LiveLaunchConfig:
     trade_date = selected("trade_date")
     threshold_update_rate_raw = values.get("threshold_update_rate")
     log_level = values.get("log_level")
+    shares = selected("shares")
     threshold_update_rate = parse_threshold_update_rate(threshold_update_rate_raw)
     if not isinstance(symbol, str) or not symbol.strip():
         raise InputValidationError("symbol is required")
@@ -155,12 +159,42 @@ def resolve_live_launch_config(args: argparse.Namespace) -> LiveLaunchConfig:
         raise InputValidationError("trade_date must be YYYY-MM-DD or null")
     if log_level not in {"INFO", "ERROR"}:
         raise InputValidationError("log_level must be INFO or ERROR")
+    parsed_shares = _parse_shares(shares, from_cli=getattr(args, "shares", None) is not None)
     fixed_threshold = float(threshold) if threshold is not None else None
     return LiveLaunchConfig(
         symbol.strip(), parsed_direction, fixed_threshold,
         resolve_config_threshold_mode(fixed_threshold, threshold_update_rate_raw is not None), Path(parameter_set_path),
-        parameter_set_id.strip(), ib_environment, trade_date, threshold_update_rate, log_level,
+        parameter_set_id.strip(), ib_environment, trade_date, threshold_update_rate, log_level, parsed_shares,
     )
+
+
+def _parse_shares(value: object, *, from_cli: bool) -> tuple[int, ...]:
+    if not isinstance(value, list) or not value:
+        raise InputValidationError("shares is required and must be a non-empty YAML list or CLI value list")
+    values: list[object] = []
+    for item in value:
+        if from_cli:
+            values.extend(part for part in str(item).replace(",", " ").split() if part)
+        else:
+            values.append(item)
+    if not values:
+        raise InputValidationError("shares is required and must not be empty")
+    parsed: list[int] = []
+    for item in values:
+        if isinstance(item, bool):
+            raise InputValidationError("shares must contain positive integers")
+        if from_cli:
+            if not isinstance(item, str) or not item.isdigit():
+                raise InputValidationError("shares must contain positive integers")
+            number = int(item)
+        else:
+            if not isinstance(item, int):
+                raise InputValidationError("shares must contain positive integers")
+            number = item
+        if number < 1:
+            raise InputValidationError("shares must contain positive integers")
+        parsed.append(number)
+    return tuple(parsed)
 
 
 def live_launch_configuration(config: LiveLaunchConfig) -> dict[str, object]:
@@ -176,6 +210,7 @@ def live_launch_configuration(config: LiveLaunchConfig) -> dict[str, object]:
         "ib_environment": config.ib_environment,
         "trade_date": config.trade_date.isoformat() if config.trade_date else None,
         "log_level": config.log_level,
+        "shares": list(config.shares),
     }
 
 
@@ -272,7 +307,8 @@ def execute_live(
     database = Database(args.database)
     database.initialize()
     repositories = SqliteRepositories(database)
-    gateway = IbApiGateway(IbConfig.from_yaml(args.ib_config, config.ib_environment), TerminalMirrorLogger(reporter.logger))
+    gateway = IbApiGateway(IbConfig.from_yaml(args.ib_config, config.ib_environment, "market"), TerminalMirrorLogger(reporter.logger))
+    order_gateway = IbApiGateway(IbConfig.from_yaml(args.ib_config, config.ib_environment, "order"), TerminalMirrorLogger(reporter.logger))
     feed: LivePaperFeed | None = None
     context: RunContext | None = None
     state: RuntimeState | None = None
@@ -298,8 +334,11 @@ def execute_live(
         reporter.use_logger(logger)
         run_logger = TerminalMirrorLogger(logger)
         gateway.set_logger(run_logger)
+        order_gateway.set_logger(run_logger)
         repositories.create(context)
         run_created = True
+        order_submitter = LiveOrderSubmitter(order_gateway, config.shares, run_logger)
+        order_submitter.start()
         reporter.info("run_created", f"RUN: created run_id={run_id}", run_id=run_id, symbol=context.symbol, trade_date=context.trade_date.isoformat(), parameter_set_id=parameter_set.parameter_set_id)
         reporter.info(
             "session_resolved",
@@ -329,6 +368,7 @@ def execute_live(
         runner_started = True
         summary = SingleDayRunner(database, repositories, clock, run_logger).execute_run(
             context, feed, state, create_run=False, on_first_bar_confirmed=feed.mark_first_bar_confirmed,
+            session=session, order_submitter=order_submitter,
         )
         print(json.dumps({
             "run_id": summary.run_id,
@@ -351,6 +391,7 @@ def execute_live(
         if feed is not None and not runner_started:
             feed.close()
         gateway.disconnect_gateway()
+        order_gateway.disconnect_gateway()
         database.close()
 
 
