@@ -71,11 +71,16 @@ def test_auto_with_configured_threshold_uses_that_initial_value() -> None:
 
 
 @pytest.mark.parametrize(
-    ("direction", "best_price", "best_order_price"),
-    [(Direction.BUY, 90.0, 95.0), (Direction.SELL, 110.0, 105.0)],
+    ("direction", "best_price", "best_order_price", "expected_reward"),
+    [
+        (Direction.BUY, 90.0, 95.0, 90.0 / 95.0),
+        (Direction.SELL, 110.0, 105.0, 105.0 / 110.0),
+        (Direction.BUY, 100.0, 100.0, 1.0),
+        (Direction.BUY, 100.0, 110.0, 100.0 / 110.0),
+    ],
 )
-def test_runtime_statistics_builds_normalized_best_reward(
-    direction: Direction, best_price: float, best_order_price: float,
+def test_runtime_statistics_builds_best_price_proximity_reward(
+    direction: Direction, best_price: float, best_order_price: float, expected_reward: float,
 ) -> None:
     context = RunContext("run-1", "AAPL", date(2025, 1, 2), _params(), direction, ThresholdMode.FIXED, 100.0, RunMode.BACKTEST, None, datetime(2025, 1, 2, 9, 0, tzinfo=ET))
     state = RuntimeState.empty(context.parameter_set, 100.0)
@@ -84,9 +89,22 @@ def test_runtime_statistics_builds_normalized_best_reward(
 
     summary = build_completed_summary(context, state, datetime(2025, 1, 2, 16, 0, tzinfo=ET))
 
-    assert summary.best_reward == pytest.approx(1 - abs(best_order_price - best_price) / abs(best_order_price + best_price))
+    assert summary.best_reward == pytest.approx(expected_reward)
     assert 0 <= summary.best_reward <= 1
     assert summary.efficiency == pytest.approx(summary.best_reward / 2)
+
+
+@pytest.mark.parametrize(("best_price", "best_order_price"), [(0.0, 100.0), (100.0, 0.0)])
+def test_runtime_statistics_returns_null_reward_for_zero_price(best_price: float, best_order_price: float) -> None:
+    context = RunContext("run-1", "AAPL", date(2025, 1, 2), _params(), Direction.BUY, ThresholdMode.FIXED, 100.0, RunMode.BACKTEST, None, datetime(2025, 1, 2, 9, 0, tzinfo=ET))
+    state = RuntimeState.empty(context.parameter_set, 100.0)
+    state.processed_bar_count = 2
+    state.statistics = DailyRunStatistics(100.0, best_price, best_order_price, 2)
+
+    summary = build_completed_summary(context, state, datetime(2025, 1, 2, 16, 0, tzinfo=ET))
+
+    assert summary.best_reward is None
+    assert summary.efficiency is None
 
 
 class _SignalTrendEngine:

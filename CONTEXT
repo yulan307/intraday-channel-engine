@@ -54,8 +54,10 @@ Implemented scope:
   unchanged.
 - `single_day_run` records `threshold_update_rate`, the actual first threshold,
   processed-Bar count, signal count, and direction-aware daily
-  best-price/reward/efficiency metrics. Reward is a clamped 0-1 symmetric
-  relative proximity between the best signal price and best `trend_price`.
+  best-price/reward/efficiency metrics. Reward is the symmetric price proximity
+  `min(best_price / best_order_price, best_order_price / best_price)` between
+  the best signal price and best `trend_price`; zero prices produce null reward
+  and efficiency.
   It uses `(run_id, trade_date)` keys. `run_summary` has one scan-level row per
   `run_id`, with total counts plus averages across completed days that processed
   Bars. It also records maximum daily signal count, reward, and efficiency.

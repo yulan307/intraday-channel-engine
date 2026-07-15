@@ -2623,9 +2623,9 @@ America/New_York-aware ISO timestamp in addition to the canonical IBAPI epoch
 `single_day_run` is the daily statistics record. It persists the first actual
 threshold, processed-Bar count, triggered signal count, and direction-aware
 best `trend_price` and signal-event price. BUY selects minima and SELL selects
-maxima. `best_reward` is the clamped 0-1 symmetric relative proximity
-`1 - abs(best_order_price - best_price) / abs(best_order_price + best_price)`.
-No-signal days and zero denominators leave price/reward/efficiency null.
+maxima. `best_reward` is the symmetric price proximity
+`min(best_price / best_order_price, best_order_price / best_price)`.
+No-signal days and zero prices leave price/reward/efficiency null.
 
 Backtest does not persist `processed_1m_bar` to SQLite. It holds each accepted
 processed record in memory for one `run_id` and writes one full-schema CSV after

@@ -1690,8 +1690,10 @@ unchanged. At the terminal state of a daily run, persisted processed Bars and
 signal events produce `single_day_run.first_threshold`, `signal_count`,
 `best_price`, `best_order_price`, and `efficiency`. BUY selects minimum
 `trend_price` and signal price; SELL selects maximum values. `best_reward` is
-the clamped 0-1 symmetric relative proximity between best order price and best
-price. A no-signal day has zero signals and null price/reward/efficiency values.
+the symmetric price proximity
+`min(best_price / best_order_price, best_order_price / best_price)` between best
+order price and best price. A no-signal day has zero signals and null
+price/reward/efficiency values.
 
 After each Backtest parameter-set scan, one `run_summary` row is written for
 the `run_id`. It aggregates total Bars/signals and averages from completed days
