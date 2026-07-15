@@ -14,3 +14,6 @@ configs/backtest.yaml
 configs/live_config.yaml
 configs/parameter_set.csv
 data/
+
+# Locally maintained planning archives; do not publish them to GitHub.
+docs/archive/

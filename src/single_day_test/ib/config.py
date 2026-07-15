@@ -17,10 +17,18 @@ class IbConfig:
     connect_timeout: float
 
     @classmethod
-    def from_yaml(cls, path: str | Path, environment: str) -> "IbConfig":
+    def from_yaml(
+        cls,
+        path: str | Path,
+        environment: str,
+        connection: str = "market",
+    ) -> "IbConfig":
         try:
+            if connection not in {"market", "order"}:
+                raise ValueError("connection must be market or order")
             document: Any = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
             profile: Any = document[environment]
-            return cls(str(profile["host"]), int(profile["port"]), int(profile["client_id"]), float(profile["connect_timeout"]))
+            client_id = profile[f"{connection}_client_id"]
+            return cls(str(profile["host"]), int(profile["port"]), int(client_id), float(profile["connect_timeout"]))
         except (OSError, TypeError, KeyError, ValueError, yaml.YAMLError) as exc:
             raise InputValidationError(f"Invalid IB YAML profile {environment!r} in {path}") from exc

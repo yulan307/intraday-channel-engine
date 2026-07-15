@@ -50,13 +50,23 @@ class Feed:
     def close(self) -> None:
         self.closed = True
 
+    def clear_error(self) -> None:
+        pass
+
 
 class FailingFeed(Feed):
+    def __init__(self, events: list[FeedEvent]) -> None:
+        super().__init__(events)
+        self.failed_once = False
+
     def next_event(self) -> FeedEvent:
         self.next_calls += 1
         if self.events:
             return self.events.pop(0)
-        raise RuntimeError("feed failed")
+        if not self.failed_once:
+            self.failed_once = True
+            raise RuntimeError("feed failed")
+        return FeedEvent(FeedStatus.BAR_END, None)
 
 
 def params() -> ParameterSet:
@@ -103,7 +113,7 @@ def test_live_runner_processes_hist_live_end_and_writes_jsonl(tmp_path: Path) ->
     assert events == ["bar_received", "bar_analysis_completed", "bar_persisted", "first_bar_confirmed", "run_completed"]
 
 
-def test_live_runner_failure_keeps_partial_rows_and_writes_failed_terminal_state(tmp_path: Path) -> None:
+def test_live_runner_recovers_from_post_first_bar_feed_error(tmp_path: Path) -> None:
     clock = Clock(datetime(2025, 1, 2, 9, 33, tzinfo=ET))
     database = Database(tmp_path / "phase5-failure.sqlite3")
     database.initialize()
@@ -111,16 +121,16 @@ def test_live_runner_failure_keeps_partial_rows_and_writes_failed_terminal_state
     feed = FailingFeed([FeedEvent(FeedStatus.BAR_AVAILABLE, bar(0, BarSource.HIST))])
     logger = JsonLineLogger(tmp_path / "logs" / "phase5-run.jsonl", clock)
 
-    with pytest.raises(RuntimeError, match="feed failed"):
-        SingleDayRunner(database, repositories, clock, logger).execute_run(
-            context(clock), feed, RuntimeState.empty(params(), 100.0),
-        )
+    summary = SingleDayRunner(database, repositories, clock, logger).execute_run(
+        context(clock), feed, RuntimeState.empty(params(), 100.0),
+    )
 
     assert feed.closed
     assert database.connection.execute("SELECT COUNT(*) FROM processed_1m_bar").fetchone()[0] == 1
-    assert database.connection.execute("SELECT status FROM single_day_run").fetchone()[0] == "FAILED"
-    assert database.connection.execute("SELECT status FROM run_summary").fetchone()[0] == "FAILED"
-    assert json.loads((tmp_path / "logs" / "phase5-run.jsonl").read_text(encoding="utf-8").splitlines()[-1])["event"] == "run_failed"
+    assert feed.waited == 1
+    assert summary.status is RunStatus.COMPLETED
+    assert database.connection.execute("SELECT status FROM single_day_run").fetchone()[0] == "COMPLETED"
+    assert database.connection.execute("SELECT status FROM run_summary").fetchone()[0] == "COMPLETED"
 
 
 def test_error_log_level_keeps_errors_and_summary_after_full_run(tmp_path: Path) -> None:

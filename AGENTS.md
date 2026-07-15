@@ -32,7 +32,7 @@ New entries should be appended to the existing history. Do not remove previous e
 
 The following documents must always reflect the latest project state:
 
-* All files under `docs/`, except `docs/revision_history.md`
+* All files under `docs/`, except `docs/revision_history.md` and `docs/archive/`
 * `./CONTEXT`
 
 These documents are current-state documents.
@@ -42,6 +42,11 @@ They do not need to preserve historical information.
 When code changes affect behavior, interfaces, parameters, data structures, algorithms, configuration, file I/O, IBAPI/TWS flow, order flow, error handling, or phase scope, update the relevant current-state documents so they describe the latest state only.
 
 Remove or rewrite outdated descriptions when necessary.
+
+### Local Archive Exception
+
+Files under `docs/archive/` are local archives. They do not require maintenance,
+current-state synchronization, revision-history entries, or GitHub publication.
 
 ---
 

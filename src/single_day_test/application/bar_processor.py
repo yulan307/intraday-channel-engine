@@ -7,6 +7,7 @@ from ..engine.channel_engine import ChannelEngine
 from ..engine.decision_engine import DecisionEngine
 from .threshold_policy import next_threshold, no_threshold_decision, resolve_threshold
 from ..domain.enums import ThresholdMode
+from ..domain.errors import InputValidationError
 
 @dataclass(frozen=True)
 class BarProcessTransition:
@@ -15,6 +16,8 @@ class BarProcessTransition:
     signal_event: SignalEvent | None
 
 def process_bar(context: RunContext, bar: CompletedBar, state: RuntimeState, trend_engine: TrendEngine, channel_engine: ChannelEngine, decision_engine: DecisionEngine) -> BarProcessTransition:
+    if bar.source is None:
+        raise InputValidationError("CompletedBar source must be classified before processing")
     trend, next_trend = trend_engine.update(bar,state.trend,context.parameter_set)
     channel, next_channel = channel_engine.update(bar,trend,state.channel,context.parameter_set)
     active_threshold = resolve_threshold(

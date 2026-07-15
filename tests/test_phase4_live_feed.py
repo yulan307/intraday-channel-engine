@@ -62,11 +62,11 @@ def test_live_feed_merges_history_then_emits_live_and_end(tmp_path) -> None:
     feed.start(); assert gateway.duration == 140
     assert gateway.callbacks is not None
     gateway.callbacks.historical(bar(0)); gateway.callbacks.historical_end()
-    first = feed.next_event(); assert first.status is FeedStatus.BAR_AVAILABLE and first.bar is not None and first.bar.source is BarSource.HIST
+    first = feed.next_event(); assert first.status is FeedStatus.BAR_AVAILABLE and first.bar is not None and first.bar.source is None
     gateway.callbacks.update(bar(1)); gateway.callbacks.update(bar(2))
-    second = feed.next_event(); assert second.bar is not None and second.bar.source is BarSource.LIVE
+    second = feed.next_event(); assert second.bar is not None and second.bar.source is None
     clock.value = datetime(2025, 1, 2, 9, 33, tzinfo=ET)
-    final = feed.next_event(); assert final.bar is not None and final.bar.source is BarSource.END
+    final = feed.next_event(); assert final.bar is not None and final.bar.source is None
     assert feed.next_event().status is FeedStatus.BAR_END
     assert database.connection.execute("SELECT COUNT(*) FROM raw_1m_bar").fetchone()[0] == 3
     feed.close(); assert gateway.handle.closed

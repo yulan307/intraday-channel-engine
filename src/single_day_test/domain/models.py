@@ -89,7 +89,8 @@ class RawBar:
 @dataclass(frozen=True)
 class CompletedBar:
     raw: RawBar
-    source: BarSource
+    # Live feeds defer classification until the runner consumes the bar.
+    source: BarSource | None
 
 
 @dataclass(frozen=True)

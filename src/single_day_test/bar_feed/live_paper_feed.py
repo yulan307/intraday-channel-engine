@@ -5,7 +5,7 @@ from collections import deque
 from collections.abc import Callable
 from datetime import datetime, timedelta
 
-from ..domain.enums import BarSource, FeedStatus
+from ..domain.enums import FeedStatus
 from ..domain.errors import HistoricalDataError
 from ..domain.models import CompletedBar, RawBar, TradingSession
 from ..ib.gateway import IbGateway, LiveBarCallbacks, SubscriptionHandle
@@ -124,7 +124,6 @@ class LivePaperFeed:
         return incoming if live and incoming.volume == existing.volume else existing
 
     def _process_batch(self, bars: list[RawBar]) -> None:
-        now = self.clock.now_et().replace(second=0, microsecond=0)
         chosen: dict[datetime, tuple[RawBar, bool]] = {}
         for bar in bars:
             previous = chosen.get(bar.timestamp_et)
@@ -140,11 +139,8 @@ class LivePaperFeed:
                 self._log_ignored_ordering_bar(bar)
                 continue
             bar, _ = chosen[timestamp]
-            end = self.session.session_end_et
-            assert end is not None
-            source = BarSource.END if timestamp == end - timedelta(minutes=1) and self.clock.now_et() >= end else (BarSource.LIVE if timestamp == now - timedelta(minutes=1) else BarSource.HIST)
             self.raw_bars.upsert_many([bar], bar_size="1 min", what_to_show="TRADES", use_rth=True)
-            self._output.append(CompletedBar(bar, source))
+            self._output.append(CompletedBar(bar, None))
             self._last_emitted = timestamp
 
     def _log_ignored_ordering_bar(self, bar: RawBar) -> None:
@@ -191,12 +187,19 @@ class LivePaperFeed:
                 raise self._error
             if self._output:
                 bar = self._output.popleft()
-                if bar.source is BarSource.END:
+                end = self.session.session_end_et
+                assert end is not None
+                if bar.raw.timestamp_et == end - timedelta(minutes=1) and self.clock.now_et() >= end:
                     self._end_bar_emitted = True
                 return FeedEvent(FeedStatus.BAR_AVAILABLE, bar)
             if self._end_bar_emitted:
                 return FeedEvent(FeedStatus.BAR_END, None)
             return FeedEvent(FeedStatus.BAR_WAITING, None)
+
+    def clear_error(self) -> None:
+        with self._condition:
+            self._error = None
+            self._condition.notify_all()
 
     def wait_for_change(self, timeout: float | None = None) -> None:
         with self._condition:

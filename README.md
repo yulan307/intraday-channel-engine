@@ -21,9 +21,25 @@ pipeline. The Live CLI creates one `LIVE_PAPER` run before any pre-market
 wait, processes `HIST`, `LIVE`, and `END` bars through `SingleDayRunner`, and
 writes `processed_1m_bar`, optional `signal_event`, and one atomic terminal
 `run_summary`/`single_day_run` status. Phase 4 continues to upsert
-`raw_1m_bar` before Phase 5 consumes each completed Bar. Live runs remain
-Fixed or Auto Threshold, paper-only, and have no order, retry, recovery, or checkpoint
-behavior.
+`raw_1m_bar` before the Runner consumes each completed Bar. Phase 7 adds a
+separate Live-only order gateway. Each IB profile has `market_client_id` for
+Backtest/market data and `order_client_id` for submission. Live requires a
+non-empty `shares` list of positive integers; `--shares` replaces it and accepts
+comma- or whitespace-separated values. Only consumer-classified `LIVE` signal
+Bars submit `MKT` / `DAY` stock orders through `SMART` in `USD`, using the one
+account returned by `managedAccounts`. A normally returning `placeOrder`
+consumes one quantity. No acknowledgement, fill, funds, holdings, position,
+or order-status tracking is performed. The configured IB endpoint remains the
+operator's responsibility.
+
+LivePaperFeed emits raw completed Bars without a final source. The Runner
+classifies `HIST` / `LIVE` / `END` at consumption time, persists that result,
+then processes, submits eligible orders, persists the Bar and signal, and
+advances strategy state. Before the first persisted Bar every error is fatal.
+Afterward, Bar and Feed errors log and continue (Feed errors are cleared and
+wait for the next callback); a post-submission SQLite failure advances the
+calculated strategy state without retrying the Bar or order. Terminal summary
+persistence remains fatal.
 
 Each run writes `data/logs/<run_id>.jsonl` by default; Live accepts `--log-dir`
 to choose another directory. `log_level` is required in both startup YAML files
@@ -43,7 +59,8 @@ strategy arguments to use that YAML file; an explicitly supplied CLI option
 overrides only its matching YAML field. `trade_date` is an optional ET date and
 maps to `--trade-date`; null selects today or the next tradable session after
 today's close. `ib_environment` selects the existing paper/live connection
-profile in `configs/ib.yaml`.
+profile in `configs/ib.yaml`. `shares` is required; each list value is the
+next submission quantity.
 
 Both CLI entrypoints print their validated, merged launch configuration and
 wait for Enter before creating runtime directories, opening SQLite, connecting
@@ -117,5 +134,6 @@ cleared and recreated; no old data is migrated or retained.
 
 Install the official IBKR TWS API Python client before running this project.
 The PyPI `ibapi==9.81.1.post1` package is too old for `SCHEDULE` and must not
-be used. Configure `configs/ib.yaml` with paper/live TWS profiles. Orders,
-recovery, and checkpointing are outside this scope.
+be used. Configure `configs/ib.yaml` with paper/live TWS profiles and separate
+market/order client IDs. Fill tracking, reconciliation, and checkpointing are
+outside this scope.

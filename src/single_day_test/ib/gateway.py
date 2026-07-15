@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from ibapi.client import EClient
 from ibapi.contract import Contract
+from ibapi.order import Order
 from ibapi.wrapper import EWrapper
 from ibapi import server_versions
 
@@ -67,9 +68,12 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
         self._next_request_id = 1
+        self._next_order_id: int | None = None
         self._pending: dict[int, _PendingRequest] = {}
         self._live_callbacks: dict[int, tuple[str, LiveBarCallbacks]] = {}
         self._connection_error: Exception | None = None
+        self._accounts_ready = threading.Event()
+        self._managed_accounts: tuple[str, ...] = ()
         self._logger = logger
 
     def set_logger(self, logger: StructuredLogger | None) -> None:
@@ -83,10 +87,16 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
         if self._logger is not None:
             self._logger.error(event, **fields)
 
-    def connect_gateway(self) -> None:
+    def connect_gateway(self, *, require_account: bool = False) -> None:
         self._ensure_schedule_client_version()
         if self.isConnected():
+            if require_account:
+                self._await_single_account()
             return
+        self._ready.clear()
+        self._accounts_ready.clear()
+        self._managed_accounts = ()
+        self._connection_error = None
         self._info("ibapi_connecting", host=self.config.host, port=self.config.port, client_id=self.config.client_id)
         self.connect(self.config.host, self.config.port, self.config.client_id)
         self._thread = threading.Thread(target=self.run, name="ibapi-event-loop", daemon=True)
@@ -94,7 +104,18 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
         if not self._ready.wait(self.config.connect_timeout):
             self.disconnect()
             raise IbApiError("Timed out waiting for IBAPI nextValidId; verify TWS API connection and client ID")
+        if require_account:
+            self._await_single_account()
         self._info("ibapi_connected", client_id=self.config.client_id)
+
+    def _await_single_account(self) -> None:
+        if not self._accounts_ready.wait(self.config.connect_timeout):
+            raise IbApiError("Timed out waiting for IBAPI managedAccounts callback")
+        if len(self._managed_accounts) != 1:
+            raise IbApiError(
+                "Expected exactly one managed account, got "
+                f"{len(self._managed_accounts)}: {', '.join(self._managed_accounts) or 'none'}"
+            )
 
     @staticmethod
     def _ensure_schedule_client_version() -> None:
@@ -112,15 +133,58 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
             self._thread.join(timeout=self.config.connect_timeout)
             self._thread = None
         self._ready.clear()
+        self._accounts_ready.clear()
+        self._managed_accounts = ()
 
     def is_connected(self) -> bool:
         return self.isConnected() and self._ready.is_set()
 
     def nextValidId(self, orderId: int) -> None:  # noqa: N802 - IBAPI callback spelling
         with self._lock:
-            self._next_request_id = max(self._next_request_id, orderId)
+            self._next_order_id = max(self._next_order_id or orderId, orderId)
         self._ready.set()
         self._info("ibapi_next_valid_id", order_id=orderId)
+
+    def managedAccounts(self, accountsList: str) -> None:  # noqa: N802 - IBAPI callback spelling
+        accounts = tuple(account.strip() for account in accountsList.split(",") if account.strip())
+        with self._lock:
+            self._managed_accounts = accounts
+        self._accounts_ready.set()
+        self._info("ibapi_managed_accounts", accounts=list(accounts), account_count=len(accounts))
+
+    def submit_market_order(self, symbol: str, action: str, quantity: int) -> int:
+        if action not in {"BUY", "SELL"}:
+            raise IbApiError(f"Unsupported order action: {action}")
+        if quantity < 1:
+            raise IbApiError("Order quantity must be at least one")
+        if not self.is_connected():
+            raise IbApiError("IBAPI order gateway is not connected")
+        self._await_single_account()
+        with self._lock:
+            if self._next_order_id is None:
+                raise IbApiError("IBAPI nextValidId is unavailable for order submission")
+            order_id = self._next_order_id
+            self._next_order_id += 1
+            account = self._managed_accounts[0]
+        order = Order()
+        order.action = action
+        order.orderType = "MKT"
+        order.totalQuantity = quantity
+        order.tif = "DAY"
+        order.account = account
+        order.transmit = True
+        self._info(
+            "ibapi_order_submitting",
+            order_id=order_id,
+            symbol=symbol,
+            action=action,
+            quantity=quantity,
+            account=account,
+            order_type=order.orderType,
+            tif=order.tif,
+        )
+        self.placeOrder(order_id, self._stock(symbol), order)
+        return order_id
 
     def error(self, reqId: int, errorTime: int, errorCode: int, errorString: str, advancedOrderRejectJson: str = "") -> None:  # noqa: N802
         self._error(

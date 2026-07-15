@@ -2,11 +2,13 @@
 paper:
   host: 127.0.0.1
   port: 7497
-  client_id: 71
+  market_client_id: 71
+  order_client_id: 73
   connect_timeout: 10
 
 live:
   host: 127.0.0.1
   port: 7496
-  client_id: 72
+  market_client_id: 72
+  order_client_id: 74
   connect_timeout: 10
