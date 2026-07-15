@@ -10,7 +10,7 @@ import pytest
 from single_day_test.application.backtest_cli import BacktestScanner, backtest_launch_configuration, resolve_backtest_launch_config
 from single_day_test.application.bar_processor import process_bar
 from single_day_test.bar_feed.base import FeedEvent
-from single_day_test.domain.enums import BarSource, DecisionLabel, Direction, FeedStatus, RunMode, RunStatus, ThresholdMode
+from single_day_test.domain.enums import BarSource, DecisionLabel, Direction, FeedStatus, RunMode, RunStatus, ThresholdMode, TrendLabel
 from single_day_test.domain.errors import InputValidationError, NonTradingDayError
 from single_day_test.domain.models import ChannelBar, ChannelResult, CompletedBar, RawBar, RunContext, TrendBar, TrendResult
 from single_day_test.domain.parameters import ParameterSet
@@ -106,7 +106,8 @@ class _SignalChannelEngine:
 
     def update(self, bar: CompletedBar, trend: TrendResult, state: ChannelState, params: ParameterSet) -> tuple[ChannelResult, ChannelState]:
         next_state = ChannelState(bars=[ChannelBar(bar.raw.timestamp_et, trend.price, bar.raw.high, bar.raw.low)])
-        return ChannelResult(self.pred_high, self.pred_low, None, None, None, None, None, None, None, None, None, None, 1), next_state
+        effective_trend = TrendLabel.UP if self.pred_high is not None else TrendLabel.DOWN
+        return ChannelResult(self.pred_high, self.pred_low, effective_trend, None, None, None, None, None, None, None, None, None, 1), next_state
 
 
 @pytest.mark.parametrize(

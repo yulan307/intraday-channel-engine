@@ -219,7 +219,7 @@ def test_channel_retains_only_the_latest_channel_window_bars() -> None:
 def test_decision_engine_records_trigger_count_and_resets_after_persist() -> None:
     engine = DecisionEngine()
     first = engine.evaluate(
-        Direction.BUY, 95.0, 100.0, 90.0, None, DecisionState(), params()
+        Direction.BUY, 95.0, 100.0, 90.0, None, TrendLabel.UP, DecisionState(), params()
     )
     second = engine.evaluate(
         Direction.BUY,
@@ -227,6 +227,7 @@ def test_decision_engine_records_trigger_count_and_resets_after_persist() -> Non
         100.0,
         90.0,
         None,
+        TrendLabel.UP,
         first.next_state_after_persist,
         params(),
     )
@@ -242,10 +243,10 @@ def test_decision_engine_records_trigger_count_and_resets_after_persist() -> Non
 def test_decision_engine_buy_and_sell_reset_on_boundary_conditions() -> None:
     engine = DecisionEngine()
     buy = engine.evaluate(
-        Direction.BUY, 90.0, 100.0, 90.0, None, DecisionState(4), params()
+        Direction.BUY, 90.0, 100.0, 90.0, None, TrendLabel.UP, DecisionState(4), params()
     )
     sell = engine.evaluate(
-        Direction.SELL, 110.0, 100.0, None, 110.0, DecisionState(4), params()
+        Direction.SELL, 110.0, 100.0, None, 110.0, TrendLabel.DOWN, DecisionState(4), params()
     )
 
     assert buy.result.decision is DecisionLabel.NO_BUY
@@ -254,3 +255,60 @@ def test_decision_engine_buy_and_sell_reset_on_boundary_conditions() -> None:
     assert sell.result.recorded_break_count == 0
     assert buy.next_state_after_persist.break_count == 0
     assert sell.next_state_after_persist.break_count == 0
+
+
+@pytest.mark.parametrize(
+    ("direction", "effective_trend", "expected"),
+    [
+        (Direction.BUY, TrendLabel.UP, DecisionLabel.BUY),
+        (Direction.BUY, TrendLabel.SIDEWAY, DecisionLabel.BUY),
+        (Direction.SELL, TrendLabel.DOWN, DecisionLabel.SELL),
+        (Direction.SELL, TrendLabel.SIDEWAY, DecisionLabel.SELL),
+    ],
+)
+def test_decision_engine_allows_directional_effective_trends(
+    direction: Direction, effective_trend: TrendLabel, expected: DecisionLabel
+) -> None:
+    result = DecisionEngine().evaluate(
+        direction,
+        95.0 if direction is Direction.BUY else 105.0,
+        100.0,
+        90.0 if direction is Direction.BUY else None,
+        110.0 if direction is Direction.SELL else None,
+        effective_trend,
+        DecisionState(1),
+        params(),
+    )
+
+    assert result.result.decision is expected
+    assert result.result.triggered is True
+
+
+@pytest.mark.parametrize(
+    ("direction", "effective_trend"),
+    [
+        (Direction.BUY, TrendLabel.DOWN),
+        (Direction.BUY, None),
+        (Direction.SELL, TrendLabel.UP),
+        (Direction.SELL, None),
+    ],
+)
+def test_decision_engine_rejects_opposite_or_missing_effective_trend(
+    direction: Direction, effective_trend: TrendLabel | None
+) -> None:
+    result = DecisionEngine().evaluate(
+        direction,
+        95.0 if direction is Direction.BUY else 105.0,
+        100.0,
+        90.0 if direction is Direction.BUY else None,
+        110.0 if direction is Direction.SELL else None,
+        effective_trend,
+        DecisionState(1),
+        params(),
+    )
+
+    assert result.result.decision is (
+        DecisionLabel.NO_BUY if direction is Direction.BUY else DecisionLabel.NO_SELL
+    )
+    assert result.result.triggered is False
+    assert result.next_state_after_persist.break_count == 0

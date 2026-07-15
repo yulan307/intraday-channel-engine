@@ -45,6 +45,10 @@ Implemented scope:
   `1 + rate/100` to the signal price. A signal-driven
   Auto Threshold update resets Trend and Channel state for that next Bar; the
   signal Bar retains its pre-reset calculations.
+- DecisionEngine requires the existing price and prediction-channel condition
+  plus `effective_trend` `UP`/`SIDEWAY` for BUY or `DOWN`/`SIDEWAY` for SELL.
+  `None` or the opposite trend produces no signal; post-signal processing is
+  unchanged.
 - `single_day_run` records `threshold_update_rate`, the actual first threshold,
   processed-Bar count, signal count, and direction-aware daily
   best-price/reward/efficiency metrics. Reward is a clamped 0-1 symmetric

@@ -286,6 +286,11 @@ Channel 回归：
 
 ### Decision
 
+BUY additionally requires `effective_trend` to be `UP` or `SIDEWAY`; SELL
+additionally requires `effective_trend` to be `DOWN` or `SIDEWAY`. A missing
+or opposite effective trend produces no signal. Signal post-processing is
+unchanged.
+
 ```text
 BUY / SELL 对称
 pred_* 为空时：
