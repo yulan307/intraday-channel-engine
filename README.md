@@ -110,8 +110,9 @@ its canonical IBAPI epoch `date`. At each terminal daily run, `single_day_run`
 stores the actual first threshold, triggered signal count, and direction-aware
 best `trend_price` / signal price. BUY selects minima and SELL selects maxima.
 No-signal days store zero signals and null price, reward, and efficiency
-statistics. `best_reward` is a clamped 0-1 symmetric relative proximity between
-the best signal price and best `trend_price`; `efficiency` is that reward
+statistics. `best_reward` is the symmetric price proximity
+`min(best_price / best_order_price, best_order_price / best_price)` between the
+best signal price and best `trend_price`; `efficiency` is that reward
 divided by signal count.
 For each `run_id`, `run_summary` stores total processed Bars and signals plus
 the average signal count, reward, and efficiency over completed days that

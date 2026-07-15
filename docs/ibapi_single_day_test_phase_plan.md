@@ -1350,7 +1350,9 @@ key is unchanged.
 At terminal state it stores `first_threshold`, `signal_count`, `best_price`,
 `best_order_price`, and `efficiency`. Statistics use runtime `trend_price` and
 signal-event price: BUY selects minima and SELL selects maxima. `best_reward`
-is the clamped 0-1 symmetric relative proximity between the two best prices.
+is the symmetric price proximity
+`min(best_price / best_order_price, best_order_price / best_price)` between the
+two best prices.
 No-signal days store `signal_count = 0` and null price/reward/efficiency values.
 Backtest holds processed records in memory and exports one full-schema CSV per
 run ID; it does not write `processed_1m_bar` to SQLite. Live keeps SQLite
