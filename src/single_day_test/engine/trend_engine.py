@@ -52,14 +52,14 @@ class TrendEngine:
                 ),
                 TrendState(
                     bars=next_bars,
-                    valid_slopes=deque(state.valid_slopes, maxlen=params.slope_std_window),
+                    valid_slopes=deque(state.valid_slopes, maxlen=params.trend_window),
                 ),
             )
 
         x = np.arange(len(next_bars), dtype=float)
         y = np.array([item.price for item in next_bars], dtype=float)
         regression = linear_regression(x, y)
-        next_valid_slopes = deque(state.valid_slopes, maxlen=params.slope_std_window)
+        next_valid_slopes = deque(state.valid_slopes, maxlen=params.trend_window)
         next_valid_slopes.append(regression.slope)
         slope_std = (
             float(np.std(np.array(next_valid_slopes, dtype=float), ddof=0))

@@ -316,7 +316,7 @@ inclusive calendar dates. Each parameter set receives one generated `run_id`;
 daily `single_day_run` records use `(run_id, trade_date)`, while scan-level
 `run_summary` records use `run_id`. `SKIPPED` non-trading days and `FAILED`
 days do not stop later dates, and one multi-day CSV is exported after all dates.
-The current SQLite schema is `backtest_run_statistics_v1` and incompatible
+The current SQLite schema is `backtest_run_statistics_v2` and incompatible
 tables are rebuilt without migration. Auto Threshold resets each date,
 initializes from the first completed Bar raw `open`, and applies
 signal-driven updates to the following Bar. Numeric thresholds with an
@@ -728,16 +728,14 @@ trend_window = 30
 
 注入后超过 `trend_window` 时，移除最旧 Bar。
 
-当前 Parameter Set 仍分别保留：
+Current Parameter Set window fields are:
 
 ```text
 trend_window
-slope_std_window
-dev_window
-residual_window
+channel_window
 ```
 
-Phase 3 再统一为 `trend_window`。
+`trend_window` also limits the valid-slope history used for `slope_std`.
 
 ### 13.2 基础价格
 
@@ -786,7 +784,8 @@ slope_rmse = linear_regression_rmse(trend_bars.price)
 
 ### 13.5 `slope_std`
 
-`slope_std` 使用最近 `slope_std_window` 个非空 slope，并包含当前 Bar 刚计算出的 slope。
+`slope_std` uses at most the latest `trend_window` non-null slopes, including
+the slope calculated for the current Bar.
 
 最少需要：
 
@@ -865,7 +864,9 @@ curr_* = null
 last_trend_bar_count = null
 ```
 
-`channel_stack` 没有长度限制。
+`channel_stack` retains at most the latest `channel_window` Bars. The bounded
+stack is the sole input to the current Channel regression and deviation
+percentiles.
 
 ### 14.2 `last_*` 与 `curr_*`
 
@@ -1101,7 +1102,7 @@ len(channel_stack) < 3
 len(channel_stack) >= 3
 ```
 
-时，使用整个当前 `channel_stack` 重新计算 `curr_*`。
+时，使用当前最多 `channel_window` 根 Bar 的 `channel_stack` 重新计算 `curr_*`。
 
 `channel_stack` 按 timestamp 从旧到新排列。长度为 `n` 时：
 

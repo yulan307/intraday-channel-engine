@@ -25,7 +25,7 @@ ET = ZoneInfo("America/New_York")
 
 
 def _params() -> ParameterSet:
-    return ParameterSet("p1", 3, 3, 1, 1, 0.8, 95.0, 95.0, 1, 1)
+    return ParameterSet("p1", 3, 3, 0.8, 95.0, 95.0, 1, 1)
 
 
 def _bar(index: int, price: float = 100.0, opening_price: float | None = None) -> CompletedBar:
@@ -311,7 +311,7 @@ def test_schema_shape_mismatch_is_rebuilt_and_processed_fields_are_exact(tmp_pat
     columns = [row[1] for row in database.connection.execute("PRAGMA table_info(processed_1m_bar)")]
     assert "unexpected" not in columns
     assert "initial_threshold" not in columns
-    assert columns[17] == "active_threshold"
+    assert columns[15] == "active_threshold"
 
 
 def test_run_persists_threshold_update_rate(tmp_path) -> None:

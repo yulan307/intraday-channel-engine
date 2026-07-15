@@ -141,7 +141,7 @@ pre-reset calculation. Fixed Threshold never changes or resets either state.
 
 The tracked parameter template is `configs/parameter_set_sample.csv`; the runtime
 `configs/parameter_set.csv` is local and ignored. The database schema is
-`backtest_run_statistics_v1`. During initialization, any
+`backtest_run_statistics_v2`. During initialization, any
 nonconforming Phase 3 table shape causes the complete Phase 3 database to be
 cleared and recreated; no old data is migrated or retained.
 

@@ -1,5 +1,5 @@
-parameter_set_id,trend_window,slope_std_window,dev_window,residual_window,r2_threshold,channel_high_percentile,channel_low_percentile,continuous_break_count,is_active
-mu-phase3-v1,30,30,30,30,0.8,95,95,2,1
-mu-phase3-v2,15,15,15,15,0.8,95,95,2,1
-mu-phase3-v3,15,15,15,15,0.8,95,95,1,1
-mu-phase3-v4,10,10,10,10,0.8,95,95,1,1
+parameter_set_id,trend_window,channel_window,r2_threshold,channel_high_percentile,channel_low_percentile,continuous_break_count,is_active
+mu-phase3-v1,30,30,0.8,95,95,2,1
+mu-phase3-v2,15,15,0.8,95,95,2,1
+mu-phase3-v3,15,15,0.8,95,95,1,1
+mu-phase3-v4,10,10,0.8,95,95,1,1

@@ -17,7 +17,7 @@ Implemented scope:
   used for the current Bar decision. Its `decision` value is null when no
   signal triggers, and otherwise is `BUY` or `SELL`. There are no JSON payload
   columns and no persisted `_et` columns.
-- The SQLite schema is `backtest_run_statistics_v1`. Initialization verifies its shape;
+- The SQLite schema is `backtest_run_statistics_v2`. Initialization verifies its shape;
   any incompatible Phase 3 tables are cleared and recreated together. Existing
   data is intentionally not migrated or retained.
 - Backtest startup is YAML-first through the local `configs/backtest.yaml`; the
@@ -31,6 +31,10 @@ Implemented scope:
   `parameter_set_id` overrides that filter. Each selected parameter set gets a
   generated run ID and scans selected dates in ascending order. One selected
   date with one non-empty `parameter_set_id` resolves to one daily backtest.
+- Parameter CSV rows use `trend_window` for both Trend regression history and
+  valid-slope standard deviation history. `channel_window` is a required
+  integer of at least 3 and caps the rolling Channel history used for Channel
+  regression and deviation percentiles.
 - Fixed Threshold remains unchanged. Auto Threshold resets every date,
   initializes from the first completed Bar's raw `open`, and updates after
   triggered BUY or SELL for the next Bar. `threshold_update_rate` is a 0-100

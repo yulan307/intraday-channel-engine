@@ -17,7 +17,7 @@ class TrendState:
     def empty(cls, params: ParameterSet) -> TrendState:
         return cls(
             bars=deque(maxlen=params.trend_window),
-            valid_slopes=deque(maxlen=params.slope_std_window),
+            valid_slopes=deque(maxlen=params.trend_window),
         )
 
 

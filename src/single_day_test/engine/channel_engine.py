@@ -110,6 +110,9 @@ class ChannelEngine:
             next_state.effective_trend = trend.raw_trend
             next_state.bars = [current_bar]
 
+        if len(next_state.bars) > params.channel_window:
+            next_state.bars = next_state.bars[-params.channel_window:]
+
         current_model = calculate_current_model(next_state.bars, params)
         self._set_current_model(next_state, current_model)
         return (

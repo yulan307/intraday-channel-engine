@@ -110,7 +110,7 @@ class Submitter:
         self.calls.append((symbol, direction)); return True
 
 
-def params() -> ParameterSet: return ParameterSet("p1", 3, 3, 1, 1, 0.8, 95.0, 95.0, 1)
+def params() -> ParameterSet: return ParameterSet("p1", 3, 3, 0.8, 95.0, 95.0, 1)
 
 
 def context(clock: Clock) -> RunContext:
