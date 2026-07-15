@@ -1,5 +1,7 @@
 # Revision History
 
+| 2026-07-15 | `engine/channel_engine.py` and Channel engine tests | Added delayed oldest-prefix selection for `curr_*` calculation. The delay is `trend_window // 2`; after the warmup ranges, the calculation uses `channel_stack[:n-delay]` while the stack remains capped by `channel_window`. | Updated CONTEXT and current Channel flow/development documentation. |
+
 | 2026-07-15 | `engine/decision_engine.py`, `application/bar_processor.py`, and Decision/Phase 3 tests | Added effective-trend gating to BUY/SELL generation. BUY now also requires UP or SIDEWAY; SELL requires DOWN or SIDEWAY. Existing signal post-processing remains unchanged. | Updated README, CONTEXT, and current Decision Engine flow/development documentation. |
 
 | 2026-07-15 | `domain/parameters.py`, Trend/Channel engines, SQLite persistence, parameter CSV templates, and tests | Replaced obsolete `slope_std_window`, `dev_window`, and `residual_window` fields with required `channel_window`. Trend now uses `trend_window` for both regression and valid-slope history; Channel retains only its latest `channel_window` Bars. Advanced the incompatible SQLite schema to `backtest_run_statistics_v2`. | Updated CONTEXT, current-state flow/development design documents, and this revision history. |
