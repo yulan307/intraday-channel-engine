@@ -4,7 +4,7 @@ from collections.abc import Callable
 from typing import Protocol
 
 from ..domain.enums import Direction
-from ..domain.errors import IbApiError
+from ..domain.errors import GatewayConnectionError, IbApiError
 from ..support.logging import StructuredLogger
 
 
@@ -31,6 +31,10 @@ class LiveOrderSubmitter:
     @property
     def current_quantity(self) -> int | None:
         return self.shares[self._next_share_index] if self.has_remaining_shares else None
+
+    @property
+    def remaining_shares(self) -> tuple[int, ...]:
+        return self.shares[self._next_share_index:]
 
     def _info(self, event: str, **fields: object) -> None:
         if self.logger is not None:
@@ -59,6 +63,8 @@ class LiveOrderSubmitter:
                     error_message=str(exc),
                 )
         if raise_on_failure:
+            if isinstance(last_error, GatewayConnectionError):
+                raise GatewayConnectionError(f"Order connection failed after {attempts} attempts during {stage}") from last_error
             raise IbApiError(f"Order connection failed after {attempts} attempts during {stage}") from last_error
         return False
 

@@ -199,6 +199,8 @@ class SignalEvent:
     decision: DecisionLabel
     price: float
     break_count: int
+    share: int | None = None
+    remained_shares: tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "timestamp_et", _normalize_dt(self.timestamp_et))

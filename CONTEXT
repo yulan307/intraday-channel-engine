@@ -156,8 +156,19 @@ fill/status tracking is performed.
 LivePaperFeed now defers source classification. The Runner classifies at
 consumption time and persists the same `HIST` / `LIVE` / `END` value; only
 `LIVE` signals submit. It submits before SQLite persistence. Before the first
-successfully persisted Bar all errors are fatal. Afterwards non-fatal errors
-log and skip the current Bar, Feed errors clear and wait for a callback, and a
-post-order SQLite error advances calculated state without retrying the Bar or
-order. Terminal summary persistence remains fatal. The configured IB endpoint
-is the operator's responsibility.
+successfully persisted Bar all errors are fatal. SQLite persistence failures
+are terminal. The configured IB endpoint is the operator's responsibility.
+
+Live connection recovery is implemented. Pre-market market/session and account
+reads close both gateways before session waiting; market-open processing creates
+fresh connections. IBAPI system connection notifications are audit logs, not
+direct Feed failures. A missing completed Bar past its expected time plus five
+minutes raises a recoverable timeout. The Live CLI closes both gateways,
+restores remaining shares from the latest persisted `signal_event` (or the YAML
+list when no event exists), increments `single_day_run.recovery_count`, and
+replays the same `run_id` from session start. Recovery upserts raw and processed
+Bars, preserves single events, and does not submit orders for replayed HIST
+Bars. Retry waits are 20 seconds, one minute, 15 minutes, then one hour until
+session close; failure to recover by close marks the Run FAILED. `signal_event`
+now stores nullable `share` and JSON `remained_shares`; any SQLite write failure
+is terminal.

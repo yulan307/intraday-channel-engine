@@ -100,6 +100,16 @@ def test_callback_error_fails_matching_live_subscription() -> None:
     assert "IBAPI error 162 for request 8" in str(errors[0])
 
 
+def test_system_connection_error_keeps_live_subscription_active() -> None:
+    api = IbApiGateway(IbConfig("127.0.0.1", 7497, 71, 0.1))
+    errors: list[Exception] = []
+    api._live_callbacks[8] = ("AAPL", LiveBarCallbacks(lambda _: None, lambda: None, lambda _: None, errors.append))
+
+    api.error(-1, 0, 1100, "Connectivity between IBKR and Trader Workstation has been lost.")
+
+    assert errors == [] and 8 in api._live_callbacks
+
+
 def test_connection_close_fails_all_pending_requests() -> None:
     api = IbApiGateway(IbConfig("127.0.0.1", 7497, 71, 0.1))
     pending = _PendingRequest(); api._pending[10] = pending
@@ -134,7 +144,7 @@ def test_nonconforming_schema_is_cleared_once(tmp_path) -> None:
     path = tmp_path / "legacy.sqlite3"
     sqlite3.connect(path).execute("CREATE TABLE raw_1m_bar (timestamp TEXT)").connection.commit()
     database = Database(path); database.initialize()
-    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "backtest_csv_statistics_v1"
+    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "live_recovery_v1"
 
 
 def test_previous_phase3_schema_is_cleared_once_and_recreated(tmp_path) -> None:
@@ -148,7 +158,7 @@ def test_previous_phase3_schema_is_cleared_once_and_recreated(tmp_path) -> None:
     database.connection.commit()
     database.initialize()
     assert database.connection.execute("SELECT COUNT(*) FROM raw_1m_bar").fetchone()[0] == 0
-    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "backtest_csv_statistics_v1"
+    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "live_recovery_v1"
     columns = {row[1] for row in database.connection.execute("PRAGMA table_info(processed_1m_bar)")}
     assert {"date", "timestamp", "wap", "bar_count", "bar_size", "what_to_show", "use_rth", "source", "trend_slope", "channel_window", "channel_pred_high", "decision_triggered"} <= columns
     assert not {"slope_std_window", "dev_window", "residual_window"} & columns

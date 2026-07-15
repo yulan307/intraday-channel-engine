@@ -35,11 +35,18 @@ operator's responsibility.
 LivePaperFeed emits raw completed Bars without a final source. The Runner
 classifies `HIST` / `LIVE` / `END` at consumption time, persists that result,
 then processes, submits eligible orders, persists the Bar and signal, and
-advances strategy state. Before the first persisted Bar every error is fatal.
-Afterward, Bar and Feed errors log and continue (Feed errors are cleared and
-wait for the next callback); a post-submission SQLite failure advances the
-calculated strategy state without retrying the Bar or order. Terminal summary
-persistence remains fatal.
+advances strategy state.
+
+Live recovers the same `run_id` after a five-minute completed-Bar timeout. IBAPI
+system connection messages are logged but do not directly cancel a Live
+subscription. Recovery closes both gateways, restores remaining shares from the
+latest `signal_event` (or configuration when no event exists), reconnects, and
+replays the session from its start. Replay upserts raw and processed Bars but
+does not recreate `signal_event` rows or submit orders for replayed Bars.
+Retries wait 20 seconds, 1 minute, 15 minutes, then 1 hour until session close;
+an unrecovered session is FAILED. Pre-market session/account reads close both
+IBAPI gateways before waiting, and market-open processing opens fresh ones.
+SQLite persistence failures are terminal.
 
 Each run writes `data/logs/<run_id>.jsonl` by default; Live accepts `--log-dir`
 to choose another directory. `log_level` is required in both startup YAML files

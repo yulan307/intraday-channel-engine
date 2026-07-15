@@ -9,7 +9,7 @@ import pytest
 
 from single_day_test.bar_feed.live_paper_feed import LivePaperFeed
 from single_day_test.domain.enums import BarSource, FeedStatus
-from single_day_test.domain.errors import HistoricalDataError
+from single_day_test.domain.errors import HistoricalDataError, RecoverableBarTimeout
 from single_day_test.domain.models import RawBar, TradingSession
 from single_day_test.ib.gateway import LiveBarCallbacks
 from single_day_test.persistence.database import Database, SqliteRepositories
@@ -174,8 +174,18 @@ def test_live_feed_uses_session_deadlines_when_runner_waits_without_timeout(tmp_
 
     assert feed._wait_timeout(None) == 180.0
     clock.value = datetime(2025, 1, 2, 9, 35, tzinfo=ET)
-    assert feed._wait_timeout(None) == 60.0
+    assert feed._wait_timeout(None) == 300.0
     assert feed._wait_timeout(2.5) == 2.5
+
+
+def test_live_feed_raises_recoverable_timeout_five_minutes_after_session_expectation(tmp_path) -> None:
+    clock = Clock(datetime(2025, 1, 2, 9, 40, tzinfo=ET))
+    session = TradingSession(date(2025, 1, 2), True, datetime(2025, 1, 2, 9, 30, tzinfo=ET), datetime(2025, 1, 2, 9, 35, tzinfo=ET))
+    database = Database(tmp_path / "bar-timeout.sqlite3"); database.initialize(); repos = SqliteRepositories(database)
+    feed = LivePaperFeed("AAPL", session, Gateway(), repos, clock)
+
+    with pytest.raises(RecoverableBarTimeout, match="Timed out waiting"):
+        feed.next_event()
 
 
 def test_live_feed_emits_heartbeat_only_after_first_bar_confirmation(tmp_path) -> None:

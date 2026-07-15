@@ -6,6 +6,7 @@ from datetime import timedelta
 
 from ..bar_feed.base import BarFeed
 from ..domain.enums import BarSource, FeedStatus, RunMode
+from ..domain.errors import RecoverableBarTimeout
 from ..domain.models import CompletedBar, ProcessedBarRecord, RunContext, RunSummary, TradingSession
 from ..domain.states import RuntimeState
 from ..engine.channel_engine import ChannelEngine
@@ -68,16 +69,19 @@ class SingleDayRunner:
         on_first_bar_confirmed: Callable[[], None] | None = None,
         session: TradingSession | None = None,
         order_submitter: LiveOrderSubmitter | None = None,
+        recovery: bool = False,
     ) -> RunSummary:
         state = initial_state
         if create_run:
             self.repositories.create(context)
-        feed.start()
         try:
+            feed.start()
             while True:
                 try:
                     event = feed.next_event()
                 except Exception as exc:
+                    if isinstance(exc, RecoverableBarTimeout):
+                        raise
                     self._raise_before_first_bar(state, exc)
                     self._error("nonfatal_feed_error", run_id=context.run_id, error_type=type(exc).__name__, error_message=str(exc))
                     feed.clear_error()
@@ -102,6 +106,7 @@ class SingleDayRunner:
                         continue
 
                     order_submitted = False
+                    consumed_share: int | None = None
                     if (
                         order_submitter is not None
                         and context.mode is RunMode.LIVE_PAPER
@@ -109,13 +114,26 @@ class SingleDayRunner:
                         and transition.signal_event is not None
                     ):
                         try:
+                            consumed_share = order_submitter.current_quantity
                             order_submitted = order_submitter.submit(
                                 context.symbol, context.direction, raise_on_error=state.processed_bar_count == 0,
                             )
+                            if not order_submitted:
+                                consumed_share = None
                         except Exception as exc:
                             self._raise_before_first_bar(state, exc)
                             self._error("order_submission_failed", run_id=context.run_id, error_type=type(exc).__name__, error_message=str(exc))
                             continue
+
+                    persisted_signal = transition.signal_event
+                    if persisted_signal is not None and order_submitter is not None:
+                        persisted_signal = replace(
+                            persisted_signal,
+                            share=consumed_share,
+                            remained_shares=getattr(order_submitter, "remaining_shares", ()),
+                        )
+                    if recovery and bar.source is BarSource.HIST:
+                        persisted_signal = None
 
                     if context.mode is RunMode.BACKTEST:
                         if processed_record_collector is None:
@@ -129,43 +147,35 @@ class SingleDayRunner:
                                 timestamp=bar.raw.timestamp_et.isoformat(), error_type=type(exc).__name__, error_message=str(exc),
                             )
                             continue
-                        if transition.signal_event:
+                        if persisted_signal:
                             try:
                                 with self.database.transaction():
-                                    self.repositories.insert(transition.signal_event)
+                                    self.repositories.insert(persisted_signal)
                             except Exception as exc:
-                                self._error(
-                                    "backtest_signal_persistence_failed", run_id=context.run_id,
-                                    timestamp=bar.raw.timestamp_et.isoformat(), error_type=type(exc).__name__, error_message=str(exc),
-                                )
+                                raise exc
                     else:
                         try:
                             with self.database.transaction():
-                                self.repositories.insert(transition.record)
-                                if transition.signal_event:
-                                    self.repositories.insert(transition.signal_event)
+                                if recovery:
+                                    self.repositories.upsert_processed(transition.record)
+                                else:
+                                    self.repositories.insert(transition.record)
+                                if persisted_signal:
+                                    self.repositories.insert(persisted_signal)
                         except Exception as exc:
-                            self._raise_before_first_bar(state, exc)
-                            self._error(
-                                "bar_persistence_failed", run_id=context.run_id,
-                                timestamp=bar.raw.timestamp_et.isoformat(), order_submitted=order_submitted,
-                                error_type=type(exc).__name__, error_message=str(exc),
-                            )
-                            if order_submitted:
-                                state = transition.next_state_after_persist
-                            continue
+                            raise exc
 
                     state = transition.next_state_after_persist
                     self._info(
                         "bar_persisted", run_id=context.run_id, timestamp=bar.raw.timestamp_et.isoformat(),
                         source=bar.source.value, processed_bar_count=state.processed_bar_count,
                     )
-                    if transition.signal_event is not None:
+                    if persisted_signal is not None:
                         self._info(
                             "signal_triggered", run_id=context.run_id,
-                            timestamp=transition.signal_event.timestamp_et.isoformat(),
-                            decision=transition.signal_event.decision.value, price=transition.signal_event.price,
-                            break_count=transition.signal_event.break_count,
+                            timestamp=persisted_signal.timestamp_et.isoformat(),
+                            decision=persisted_signal.decision.value, price=persisted_signal.price,
+                            break_count=persisted_signal.break_count,
                         )
                     if state.processed_bar_count == 1:
                         self._info("first_bar_confirmed", run_id=context.run_id, timestamp=bar.raw.timestamp_et.isoformat(), next_action="continue_run_without_info_trace")
@@ -185,6 +195,8 @@ class SingleDayRunner:
                     feed.wait_for_change()
                 else:
                     raise RuntimeError(f"Unexpected feed status: {event.status}")
+        except RecoverableBarTimeout:
+            raise
         except Exception as exc:
             summary = build_failed_summary(context, state, exc, self.clock.now_et())
             try:

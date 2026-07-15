@@ -6,7 +6,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 
 from ..domain.enums import FeedStatus
-from ..domain.errors import HistoricalDataError
+from ..domain.errors import HistoricalDataError, RecoverableBarTimeout
 from ..domain.models import CompletedBar, RawBar, TradingSession
 from ..ib.gateway import IbGateway, LiveBarCallbacks, SubscriptionHandle
 from ..persistence.raw_bar_repository import RawBarRepository
@@ -175,8 +175,25 @@ class LivePaperFeed:
             self._in_progress = None
         if self._last_emitted == expected or any(bar.raw.timestamp_et == expected for bar in self._output):
             return
-        if now >= end + timedelta(seconds=60):
-            raise HistoricalDataError("Timed out waiting for final expected RTH bar")
+    def _bar_timeout_deadline(self) -> datetime:
+        start, end = self.session.session_start_et, self.session.session_end_et
+        assert start is not None and end is not None
+        if self.clock.now_et() >= end:
+            expected = end
+        elif self._last_emitted is None:
+            expected = start
+        elif self._last_emitted >= end - timedelta(minutes=1):
+            expected = end
+        else:
+            expected = self._last_emitted + timedelta(minutes=1)
+        return expected + timedelta(minutes=5)
+
+    def _raise_if_bar_timed_out(self) -> None:
+        deadline = self._bar_timeout_deadline()
+        if self.clock.now_et() >= deadline:
+            raise RecoverableBarTimeout(
+                f"Timed out waiting for completed RTH bar by {deadline.isoformat()}"
+            )
 
     def next_event(self) -> FeedEvent:
         with self._condition:
@@ -194,6 +211,7 @@ class LivePaperFeed:
                 return FeedEvent(FeedStatus.BAR_AVAILABLE, bar)
             if self._end_bar_emitted:
                 return FeedEvent(FeedStatus.BAR_END, None)
+            self._raise_if_bar_timed_out()
             return FeedEvent(FeedStatus.BAR_WAITING, None)
 
     def clear_error(self) -> None:
@@ -214,7 +232,7 @@ class LivePaperFeed:
         end = self.session.session_end_et
         assert end is not None
         now = self.clock.now_et()
-        deadline = end if now < end else end + timedelta(seconds=60)
+        deadline = self._bar_timeout_deadline()
         wait_seconds = max(0.0, (deadline - now).total_seconds())
         if self._next_heartbeat_at is not None:
             wait_seconds = min(wait_seconds, max(0.0, (self._next_heartbeat_at - now).total_seconds()))

@@ -13,7 +13,7 @@ from ..domain.enums import RunStatus
 from ..domain.errors import PersistenceError
 from ..domain.models import ProcessedBarRecord, RawBar, RunContext, RunSummary, SignalEvent, TradingSession
 
-SCHEMA_VERSION = "backtest_csv_statistics_v1"
+SCHEMA_VERSION = "live_recovery_v1"
 
 PROCESSED_BAR_COLUMNS = [
     "run_id", "date", "timestamp", "symbol", "trade_date", "mode", "bar_source", "direction", "parameter_set_id",
@@ -77,7 +77,7 @@ class Database:
           live_phase TEXT, direction TEXT NOT NULL, parameter_set_id TEXT NOT NULL,
           parameter_snapshot_json TEXT NOT NULL, threshold_mode TEXT NOT NULL,
           fixed_threshold REAL, threshold_update_rate REAL NOT NULL, status TEXT NOT NULL, started_at_epoch INTEGER NOT NULL,
-          ended_at_epoch INTEGER, error_type TEXT, error_message TEXT, first_threshold REAL,
+          ended_at_epoch INTEGER, error_type TEXT, error_message TEXT, recovery_count INTEGER NOT NULL, first_threshold REAL,
           processed_bar_count INTEGER NOT NULL, signal_count INTEGER NOT NULL, best_price REAL, best_order_price REAL,
           best_reward REAL, efficiency REAL,
           PRIMARY KEY(run_id, trade_date));
@@ -106,7 +106,7 @@ class Database:
           PRIMARY KEY(run_id, date));
         CREATE TABLE signal_event (
           run_id TEXT NOT NULL, date INTEGER NOT NULL, decision TEXT NOT NULL, price REAL NOT NULL,
-          break_count INTEGER NOT NULL, PRIMARY KEY(run_id, date));
+          break_count INTEGER NOT NULL, share INTEGER, remained_shares TEXT NOT NULL, PRIMARY KEY(run_id, date));
         CREATE TABLE run_summary (
           run_id TEXT PRIMARY KEY, status TEXT NOT NULL, processed_bar_count INTEGER NOT NULL,
           signal_count INTEGER NOT NULL, avg_signal_count_per_day REAL,
@@ -123,9 +123,9 @@ class Database:
             "schema_meta": ["key", "value"],
             "trade_date": ["trade_date", "is_trading_day", "session_start_epoch", "session_end_epoch", "source", "created_at_epoch", "updated_at_epoch"],
             "raw_1m_bar": ["symbol", "date", "timestamp", "open", "high", "low", "close", "volume", "wap", "bar_count", "bar_size", "what_to_show", "use_rth", "source", "created_at_epoch", "updated_at_epoch"],
-            "single_day_run": ["run_id", "trade_date", "symbol", "mode", "live_phase", "direction", "parameter_set_id", "parameter_snapshot_json", "threshold_mode", "fixed_threshold", "threshold_update_rate", "status", "started_at_epoch", "ended_at_epoch", "error_type", "error_message", "first_threshold", "processed_bar_count", "signal_count", "best_price", "best_order_price", "best_reward", "efficiency"],
+            "single_day_run": ["run_id", "trade_date", "symbol", "mode", "live_phase", "direction", "parameter_set_id", "parameter_snapshot_json", "threshold_mode", "fixed_threshold", "threshold_update_rate", "status", "started_at_epoch", "ended_at_epoch", "error_type", "error_message", "recovery_count", "first_threshold", "processed_bar_count", "signal_count", "best_price", "best_order_price", "best_reward", "efficiency"],
             "processed_1m_bar": PROCESSED_BAR_COLUMNS,
-            "signal_event": ["run_id", "date", "decision", "price", "break_count"],
+            "signal_event": ["run_id", "date", "decision", "price", "break_count", "share", "remained_shares"],
             "run_summary": ["run_id", "status", "processed_bar_count", "signal_count", "avg_signal_count_per_day", "avg_best_reward_per_day", "avg_efficiency_per_day", "max_signal_count_per_day", "max_best_reward_per_day", "max_efficiency_per_day", "started_at_epoch", "ended_at_epoch", "error_type", "error_message"],
         }
         actual_tables = {row[0] for row in self.connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall() if not row[0].startswith("sqlite_")}
@@ -193,7 +193,7 @@ class SqliteRepositories:
 
     def create(self, context: RunContext) -> None:
         with self.database.transaction():
-            self.database.connection.execute('INSERT INTO single_day_run VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (context.run_id,context.trade_date.isoformat(),context.symbol,context.mode.value,context.live_phase.value if context.live_phase else None,context.direction.value,context.parameter_set.parameter_set_id,json.dumps(context.parameter_set.__dict__),context.threshold_mode.value,context.fixed_threshold,context.threshold_update_rate,RunStatus.RUNNING.value,_epoch(context.started_at_et),None,None,None,None,0,0,None,None,None,None))
+            self.database.connection.execute('INSERT INTO single_day_run VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (context.run_id,context.trade_date.isoformat(),context.symbol,context.mode.value,context.live_phase.value if context.live_phase else None,context.direction.value,context.parameter_set.parameter_set_id,json.dumps(context.parameter_set.__dict__),context.threshold_mode.value,context.fixed_threshold,context.threshold_update_rate,RunStatus.RUNNING.value,_epoch(context.started_at_et),None,None,None,0,None,0,0,None,None,None,None))
 
     def mark_completed(self, run_id: str, trade_date: date, ended_at_et: datetime) -> None: self._mark(run_id, trade_date, RunStatus.COMPLETED, ended_at_et, None)
     def mark_failed(self, run_id: str, trade_date: date, ended_at_et: datetime, error_type: str, error_message: str) -> None: self._mark(run_id, trade_date, RunStatus.FAILED, ended_at_et, (error_type,error_message))
@@ -202,15 +202,36 @@ class SqliteRepositories:
     def _mark(self, run_id: str, trade_date: date, status: RunStatus, ended: datetime, error: tuple[str,str] | None) -> None:
         with self.database.transaction(): self.database.connection.execute('UPDATE single_day_run SET status=?, ended_at_epoch=?, error_type=?, error_message=? WHERE run_id=? AND trade_date=?', (status.value,_epoch(ended),error[0] if error else None,error[1] if error else None,run_id,trade_date.isoformat()))
 
+    def increment_recovery_count(self, run_id: str, trade_date: date) -> None:
+        with self.database.transaction():
+            self.database.connection.execute(
+                'UPDATE single_day_run SET recovery_count=recovery_count+1, status=?, ended_at_epoch=NULL, error_type=NULL, error_message=NULL WHERE run_id=? AND trade_date=?',
+                (RunStatus.RUNNING.value, run_id, trade_date.isoformat()),
+            )
+
     def insert(self, value: ProcessedBarRecord | SignalEvent) -> None:
         epoch = _epoch(value.timestamp_et)
         if isinstance(value, SignalEvent):
-            self.database.connection.execute('INSERT INTO signal_event VALUES (?, ?, ?, ?, ?)', (value.run_id,epoch,value.decision.value,value.price,value.break_count)); return
+            self.database.connection.execute('INSERT INTO signal_event VALUES (?, ?, ?, ?, ?, ?, ?)', (value.run_id,epoch,value.decision.value,value.price,value.break_count,value.share,json.dumps(list(value.remained_shares)))); return
         row = processed_bar_row(value)
         self.database.connection.execute(
             f'INSERT INTO processed_1m_bar ({", ".join(PROCESSED_BAR_COLUMNS)}) VALUES ({", ".join("?" for _ in PROCESSED_BAR_COLUMNS)})',
             tuple(row[column] for column in PROCESSED_BAR_COLUMNS),
         )
+
+    def upsert_processed(self, value: ProcessedBarRecord) -> None:
+        row = processed_bar_row(value)
+        assignments = ", ".join(f'{column}=excluded.{column}' for column in PROCESSED_BAR_COLUMNS if column not in {'run_id', 'date'})
+        self.database.connection.execute(
+            f'INSERT INTO processed_1m_bar ({", ".join(PROCESSED_BAR_COLUMNS)}) VALUES ({", ".join("?" for _ in PROCESSED_BAR_COLUMNS)}) ON CONFLICT(run_id,date) DO UPDATE SET {assignments}',
+            tuple(row[column] for column in PROCESSED_BAR_COLUMNS),
+        )
+
+    def latest_remaining_shares(self, run_id: str) -> tuple[int, ...] | None:
+        row = self.database.connection.execute(
+            'SELECT remained_shares FROM signal_event WHERE run_id=? ORDER BY date DESC LIMIT 1', (run_id,)
+        ).fetchone()
+        return tuple(json.loads(row['remained_shares'])) if row is not None else None
 
     def complete_with_summary(self, summary: RunSummary, *, write_run_summary: bool = True) -> None:
         self._save_terminal_summary(summary, RunStatus.COMPLETED, write_run_summary=write_run_summary)

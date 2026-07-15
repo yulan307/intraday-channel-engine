@@ -18,7 +18,15 @@ class IbApiError(SingleDayTestError):
     pass
 
 
+class GatewayConnectionError(IbApiError):
+    pass
+
+
 class HistoricalDataError(SingleDayTestError):
+    pass
+
+
+class RecoverableBarTimeout(HistoricalDataError):
     pass
 
 
