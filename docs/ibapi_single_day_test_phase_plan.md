@@ -1154,8 +1154,10 @@ If SQLite persistence fails after order submission, log the error, advance with
 the calculated RuntimeState, and continue to the next Bar. Do not retry that
 Bar or order.
 
-SQLite persistence errors are raised and end the run. A missing completed Bar
-past its expected timestamp plus five minutes raises a recoverable timeout;
+SQLite persistence errors are raised and end the run. Before the first
+historical callback of an in-session subscription, the expected timestamp is
+`max(session_start, subscription_start)`; a missing completed Bar past that or
+a later expected timestamp plus five minutes raises a recoverable timeout;
 the Live CLI reconnects and replays the same run. IBAPI system connection
 notifications only log and do not directly cancel the subscription.
 

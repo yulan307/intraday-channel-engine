@@ -1734,7 +1734,9 @@ pre-market reads -> close gateways -> wait for market open
 ```
 
 Connection-status callbacks are logged and rely on the completed-Bar deadline
-for recovery. Replay upserts raw/processed Bars, preserves single events, and
+for recovery. Before the first historical callback, that deadline starts at
+`max(session_start, subscription_start) + 5 minutes`; it then follows the
+completed-Bar sequence. Replay upserts raw/processed Bars, preserves single events, and
 does not submit orders for replayed HIST Bars. Retries use 20 seconds, one
 minute, 15 minutes, then one hour until session close, when an unrecovered Run
 is FAILED.

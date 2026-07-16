@@ -36,6 +36,7 @@ class LivePaperFeed:
         self._end_bar_emitted = False
         self._closed = False
         self._last_emitted: datetime | None = None
+        self._started_at: datetime | None = None
         self._error: Exception | None = None
         self._subscription: SubscriptionHandle | None = None
         self._heartbeat = heartbeat
@@ -44,6 +45,7 @@ class LivePaperFeed:
 
     def start(self) -> None:
         now = self.clock.now_et()
+        self._started_at = now
         start = self.session.session_start_et
         assert start is not None
         seconds = max(60, int((now - start).total_seconds()) + 10)
@@ -181,7 +183,7 @@ class LivePaperFeed:
         if self.clock.now_et() >= end:
             expected = end
         elif self._last_emitted is None:
-            expected = start
+            expected = max(start, self._started_at or start)
         elif self._last_emitted >= end - timedelta(minutes=1):
             expected = end
         else:
