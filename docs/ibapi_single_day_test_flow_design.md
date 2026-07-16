@@ -1746,7 +1746,27 @@ Runner 的 `WAITING` 调用无参 `wait_for_change()`；Feed 负责在新 callba
 收盘或收盘后 60 秒最终 Bar deadline 时唤醒。每个 run 默认写入
 `data/logs/<run_id>.jsonl`。启动 YAML 的 `log_level` 必须为 `INFO` 或 `ERROR`：INFO 仅记录至首根成功持久化 Bar（含 IBAPI 请求/回调与策略结果），之后正常处理静默；两种等级都保留 IBAPI error 回调和终态。输入校验以 exit code 2 正常退出并写入 `input_validation_error`，不输出 traceback；Session 选择和盘前等待也记录到 console/JSONL。首根 Bar 后 Live 每五分钟仅在终端输出心跳。晚到或重复 Bar 会记录并跳过。无订单、重试、恢复或
 checkpoint；真实 TWS 全天验收由用户最后执行。
-# Phase 8 update: validation failures write UNKNOWN JSONL only; valid runs use
-# a private database and process-specific client IDs. Only post-close BAR_END +
-# COMPLETED merges retained tables to the serialized master database, exports
-# processed CSV, and deletes the private file.
+# Phase 8 — Concurrent Live Paper Flow
+
+```text
+Validate one Live YAML and load one parameter set
+  -> validation failure: UNKNOWN JSONL only, exit
+  -> resolve session and create run_id JSONL
+  -> generate process-lifetime distinct client IDs
+  -> acquire per-symbol mutex
+  -> connect market gateway; connect order gateway and verify one account
+  -> initialize temporary_directory/<run_id>.sqlite3
+  -> persist single_day_run, disconnect gateways, wait for the session
+  -> reconnect and execute the unchanged Phase 7 Live/recovery loop
+  -> BAR_END + COMPLETED after close only
+       -> wait for master merge mutex
+       -> atomically merge retained tables with source-wins upserts
+       -> export processed_1m_bar to data/<run_id>.csv
+       -> delete private database
+  -> failed, stopped, incomplete, merge/export failure: retain private database; no merge
+```
+
+The operator launches one independent process per different symbol. Phase 8
+does not add a supervisor, same-symbol coordination, account/position/funds
+checks, order acknowledgement/fill tracking, or an application concurrency cap.
+TWS/IBKR limits remain authoritative.

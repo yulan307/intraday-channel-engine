@@ -1377,6 +1377,25 @@ raw/processed Bars use upsert; single events remain insert-only and replayed
 HIST Bars do not submit orders. Delay retries are 20 seconds, one minute,
 15 minutes, then one hour until session close, which marks an unrecovered Run
 FAILED. Single events persist nullable `share` plus JSON `remained_shares`.
-# Phase 8 is implemented: concurrent different-symbol Live Paper processes are
-# isolated by named mutex/client IDs/private SQLite and merge only completed
-# post-close data. SQLite initialization is non-destructive for all callers.
+# Phase 8 — Implemented: Concurrent Live Paper Runs for Different Symbols
+
+Status: implemented and covered by focused automated tests. Manual acceptance
+is concurrent-symbol operation against TWS Paper; no Live-account test is in
+scope.
+
+Delivered scope:
+
+- Independent manually started Windows process per different symbol, protected
+  by a per-symbol named mutex.
+- Required Live YAML `temporary_directory`, private run database, normal
+  run JSONL, and UNKNOWN-only validation-failure JSONL.
+- Distinct process-lifetime market/order client IDs, error-326 replacement of
+  only the colliding ID, and unchanged Phase 7 reconnect/replay behavior.
+- Non-destructive SQLite initialization for Live and Backtest.
+- Serialized, atomic completed-run merge with nullable column alignment,
+  source-overwrites-target upserts, Backtest-compatible CSV export, and private
+  database deletion only after both merge and export succeed.
+
+Excluded scope remains account management, order/fill tracking, funds checks,
+positions/holdings checks, a multi-symbol launcher, a supervisor, and retained
+database retry tooling.
