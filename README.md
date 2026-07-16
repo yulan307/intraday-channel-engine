@@ -1,5 +1,21 @@
 # Intraday Channel Engine — Phase 5 Live Paper Closed Loop
 
+## Phase 8 concurrent Live Paper runs
+
+Phase 8 permits independently started Live Paper processes for different symbols.
+Each valid run gets a JSONL log and private SQLite database in the required
+Live YAML `temporary_directory`; duplicate environment/host/port/symbol starts
+are rejected by a Windows mutex. Market and order connections use distinct
+random positive client IDs. IBAPI 326 regenerates only the colliding ID (up to
+32 attempts), and reconnect/recovery reuse the selected IDs.
+
+Only a post-close `BAR_END` run with `COMPLETED` atomically merges its private
+`trade_date`, `raw_1m_bar`, `single_day_run`, `signal_event`, and `run_summary`
+into `--database`, then exports `processed_1m_bar` to `data/<run_id>.csv` and
+deletes the private file. Other terminal paths retain the private database and
+do not merge. SQLite initialization is non-destructive for every caller: it
+creates missing objects only and never clears existing data for schema drift.
+
 Phase 3 Expand uses IBAPI as the only raw-market-data contract. Historical
 `BarData` is persisted in SQLite with native UTC epoch `date`, OHLC, `volume`,
 `wap`, and `barCount`; ET timestamps are derived for RTH validation and
@@ -77,9 +93,12 @@ wait for Enter before creating runtime directories, opening SQLite, connecting
 to TWS, or requesting data.
 
 On Windows, `run_live.ps1` and `run_backtest.ps1` start the respective CLI from
-the project `.venv` and project root. They forward all arguments unchanged, so
-`./run_live.ps1 --help`, `./run_backtest.ps1 --help`, and YAML overrides such
-as `./run_backtest.ps1 --parameter-set-id another-set` are supported.
+the project `.venv` and project root. Their optional first positional argument
+is a YAML filename under `configs/`: `./run_live.ps1 MU.yaml` passes
+`--config configs/MU.yaml` to Python. Without it, Live uses
+`configs/live_config.yaml` and Backtest uses `configs/backtest.yaml`. Remaining
+arguments remain ordinary CLI overrides, for example
+`./run_backtest.ps1 --parameter-set-id another-set`.
 
 An `InputValidationError` is an expected CLI exit: the console prints one
 `ERROR: ...` line, the error is appended to `<log_dir>/startup.jsonl` before a

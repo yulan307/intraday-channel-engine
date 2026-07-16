@@ -1377,3 +1377,6 @@ raw/processed Bars use upsert; single events remain insert-only and replayed
 HIST Bars do not submit orders. Delay retries are 20 seconds, one minute,
 15 minutes, then one hour until session close, which marks an unrecovered Run
 FAILED. Single events persist nullable `share` plus JSON `remained_shares`.
+# Phase 8 is implemented: concurrent different-symbol Live Paper processes are
+# isolated by named mutex/client IDs/private SQLite and merge only completed
+# post-close data. SQLite initialization is non-destructive for all callers.

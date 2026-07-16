@@ -1,5 +1,9 @@
 # Revision History
 
+| 2026-07-17 | `run_live.ps1`, `run_backtest.ps1` | Changed launcher YAML selection to an optional first filename under `configs/`; the scripts internally pass the corresponding Python `--config` argument and preserve remaining CLI overrides. | Updated README and CONTEXT. |
+
+| 2026-07-16 | `live_cli.py`, IB gateway, SQLite persistence, Windows mutex support, Live YAML/configs, and Phase 8 tests | Implemented independent different-symbol Live Paper runs: private run databases, per-process client IDs with 326 retry, symbol/merge mutexes, completed-run atomic source-wins merge, processed CSV export, and retention on incomplete/failure paths. SQLite initialization is now non-destructive for all callers. | Updated README, CONTEXT, Phase 8 draft, and current-state design/flow/phase-plan documents. |
+
 | 2026-07-15 | `engine/decision_engine.py`, `application/bar_processor.py`, and Decision/Phase 3 tests | Replaced effective-trend gating with current-Bar slope gating. BUY requires `trend_slope >= trend_slope_std`; SELL requires `trend_slope <= -trend_slope_std`. Signal post-processing remains unchanged. | Updated README, CONTEXT, current Decision Engine flow/development documentation, and the phase plan. |
 
 | 2026-07-15 | `tests/test_live_cli_status.py` | Made the invalid-date CLI regression test derive its temporary configuration from the tracked live YAML sample and use the tracked parameter-set sample, avoiding dependence on local runtime configuration files. | Sample YAML and CSV files were not modified. |

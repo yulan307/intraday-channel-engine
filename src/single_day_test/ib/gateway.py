@@ -13,7 +13,7 @@ from ibapi.order import Order
 from ibapi.wrapper import EWrapper
 from ibapi import server_versions
 
-from ..domain.errors import GatewayConnectionError, HistoricalDataError, IbApiError
+from ..domain.errors import ClientIdInUseError, GatewayConnectionError, HistoricalDataError, IbApiError
 from ..domain.models import RawBar, TradingSession
 from ..support.logging import StructuredLogger
 from .config import IbConfig
@@ -65,6 +65,7 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
         EClient.__init__(self, self)
         self.config = config
         self._ready = threading.Event()
+        self._connection_error: Exception | None = None
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
         self._next_request_id = 1
@@ -93,13 +94,18 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
                 self._await_single_account()
             return
         self._ready.clear()
+        self._connection_error = None
         self._accounts_ready.clear()
         self._managed_accounts = ()
         self._info("ibapi_connecting", host=self.config.host, port=self.config.port, client_id=self.config.client_id)
         self.connect(self.config.host, self.config.port, self.config.client_id)
         self._thread = threading.Thread(target=self.run, name="ibapi-event-loop", daemon=True)
         self._thread.start()
-        if not self._ready.wait(self.config.connect_timeout):
+        ready = self._ready.wait(self.config.connect_timeout)
+        if self._connection_error is not None:
+            self.disconnect()
+            raise self._connection_error
+        if not ready:
             self.disconnect()
             raise GatewayConnectionError("Timed out waiting for IBAPI nextValidId; verify TWS API connection and client ID")
         if require_account:
@@ -191,6 +197,10 @@ class IbApiGateway(EWrapper, EClient):  # type: ignore[misc]
             advanced_order_reject_json=advancedOrderRejectJson or None,
         )
         if errorCode in {1100, 1101, 1102, 1300, 502, 2103, 2104, 2105, 2106, 2157, 2158}:
+            return
+        if errorCode == 326:
+            self._connection_error = ClientIdInUseError(f"IBAPI client ID {self.config.client_id} is already in use")
+            self._ready.set()
             return
         error = IbApiError(f"IBAPI error {errorCode} for request {reqId}: {errorString}")
         with self._lock:

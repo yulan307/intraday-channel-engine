@@ -34,3 +34,6 @@ trade_date: null
 
 # INFO writes startup-through-first-bar diagnostics; ERROR writes only errors and final summaries.
 log_level: INFO
+
+# Phase 8 private per-run databases. The --database argument remains the master database.
+temporary_directory: data/runs

@@ -10,8 +10,17 @@ if (-not (Test-Path -LiteralPath $python)) {
 Push-Location $projectRoot
 $exitCode = 1
 try {
-    # All supplied arguments, including --help, are forwarded unchanged.
-    & $python -m single_day_test.application.backtest_cli @args
+    $configFile = "backtest.yaml"
+    $remainingArgs = $args
+    if ($args.Count -gt 0 -and -not $args[0].StartsWith("-")) {
+        $configFile = $args[0]
+        $remainingArgs = @($args | Select-Object -Skip 1)
+    }
+    if ([IO.Path]::GetFileName($configFile) -ne $configFile) {
+        throw "Config input must be a YAML filename under configs: $configFile"
+    }
+    # The optional first argument is a configs/ filename; other CLI overrides pass through unchanged.
+    & $python -m single_day_test.application.backtest_cli --config (Join-Path "configs" $configFile) @remainingArgs
     $exitCode = $LASTEXITCODE
 }
 finally {

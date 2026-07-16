@@ -2664,3 +2664,7 @@ and submits no orders for replayed HIST Bars. Retry delays are 20 seconds, one
 minute, 15 minutes, then one hour until session close; an unrecovered Run is
 FAILED. `signal_event` adds nullable `share` and JSON `remained_shares`; SQLite
 write failures terminate the Run.
+# Phase 8 update: Live Paper supports independent processes for different
+# symbols through Windows named mutexes, private run SQLite files, random
+# per-process client IDs, and completed-run master merge/CSV export. Ordinary
+# SQLite initialization is non-destructive and never rebuilds schema-drift data.

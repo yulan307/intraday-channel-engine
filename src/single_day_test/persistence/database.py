@@ -29,7 +29,7 @@ PROCESSED_BAR_COLUMNS = [
 
 
 class Database:
-    """SQLite storage with a deliberately non-compatible Phase 3 schema."""
+    """SQLite storage which only creates missing tables; it never rebuilds data."""
     def __init__(self, path: str | Path, *, rebuild_legacy: bool = False) -> None:
         self.path = str(path)
         # IBAPI invokes live historical callbacks on its event-loop thread.
@@ -52,27 +52,19 @@ class Database:
             raise PersistenceError(str(exc)) from exc
 
     def initialize(self) -> None:
-        marker = self.connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='schema_meta'").fetchone()
-        if marker is not None:
-            version = self.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()
-            if version is not None and version[0] == SCHEMA_VERSION and self._schema_is_current():
-                return
-            self._drop_all()
-        elif self.connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='raw_1m_bar'").fetchone() is not None:
-            self._drop_all()
         self.connection.executescript('''
-        CREATE TABLE schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-        CREATE TABLE trade_date (
+        CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS trade_date (
           trade_date TEXT PRIMARY KEY, is_trading_day INTEGER NOT NULL,
           session_start_epoch INTEGER, session_end_epoch INTEGER,
           source TEXT NOT NULL, created_at_epoch INTEGER NOT NULL, updated_at_epoch INTEGER NOT NULL);
-        CREATE TABLE raw_1m_bar (
+        CREATE TABLE IF NOT EXISTS raw_1m_bar (
           symbol TEXT NOT NULL, date INTEGER NOT NULL, timestamp TEXT NOT NULL, open REAL NOT NULL, high REAL NOT NULL,
           low REAL NOT NULL, close REAL NOT NULL, volume REAL NOT NULL, wap REAL NOT NULL,
           bar_count INTEGER NOT NULL, bar_size TEXT NOT NULL, what_to_show TEXT NOT NULL,
           use_rth INTEGER NOT NULL, source TEXT NOT NULL, created_at_epoch INTEGER NOT NULL,
           updated_at_epoch INTEGER NOT NULL, PRIMARY KEY(symbol, date));
-        CREATE TABLE single_day_run (
+        CREATE TABLE IF NOT EXISTS single_day_run (
           run_id TEXT NOT NULL, trade_date TEXT NOT NULL, symbol TEXT NOT NULL, mode TEXT NOT NULL,
           live_phase TEXT, direction TEXT NOT NULL, parameter_set_id TEXT NOT NULL,
           parameter_snapshot_json TEXT NOT NULL, threshold_mode TEXT NOT NULL,
@@ -81,7 +73,7 @@ class Database:
           processed_bar_count INTEGER NOT NULL, signal_count INTEGER NOT NULL, best_price REAL, best_order_price REAL,
           best_reward REAL, efficiency REAL,
           PRIMARY KEY(run_id, trade_date));
-        CREATE TABLE processed_1m_bar (
+        CREATE TABLE IF NOT EXISTS processed_1m_bar (
           run_id TEXT NOT NULL, date INTEGER NOT NULL, timestamp TEXT NOT NULL, symbol TEXT NOT NULL, trade_date TEXT NOT NULL,
           mode TEXT NOT NULL, bar_source TEXT NOT NULL, direction TEXT NOT NULL, parameter_set_id TEXT NOT NULL,
           trend_window INTEGER NOT NULL, channel_window INTEGER NOT NULL, r2_threshold REAL NOT NULL,
@@ -104,10 +96,10 @@ class Database:
           decision TEXT, decision_recorded_break_count INTEGER NOT NULL,
           decision_triggered INTEGER NOT NULL,
           PRIMARY KEY(run_id, date));
-        CREATE TABLE signal_event (
+        CREATE TABLE IF NOT EXISTS signal_event (
           run_id TEXT NOT NULL, date INTEGER NOT NULL, decision TEXT NOT NULL, price REAL NOT NULL,
           break_count INTEGER NOT NULL, share INTEGER, remained_shares TEXT NOT NULL, PRIMARY KEY(run_id, date));
-        CREATE TABLE run_summary (
+        CREATE TABLE IF NOT EXISTS run_summary (
           run_id TEXT PRIMARY KEY, status TEXT NOT NULL, processed_bar_count INTEGER NOT NULL,
           signal_count INTEGER NOT NULL, avg_signal_count_per_day REAL,
           avg_best_reward_per_day REAL, avg_efficiency_per_day REAL,
@@ -115,37 +107,8 @@ class Database:
           started_at_epoch INTEGER NOT NULL, ended_at_epoch INTEGER NOT NULL, error_type TEXT, error_message TEXT,
           CHECK (status IN ('COMPLETED', 'FAILED', 'SKIPPED')));
         ''')
-        self.connection.execute("INSERT INTO schema_meta VALUES ('schema_version', ?)", (SCHEMA_VERSION,))
+        self.connection.execute("INSERT OR IGNORE INTO schema_meta VALUES ('schema_version', ?)", (SCHEMA_VERSION,))
         self.connection.commit()
-
-    def _schema_is_current(self) -> bool:
-        expected = {
-            "schema_meta": ["key", "value"],
-            "trade_date": ["trade_date", "is_trading_day", "session_start_epoch", "session_end_epoch", "source", "created_at_epoch", "updated_at_epoch"],
-            "raw_1m_bar": ["symbol", "date", "timestamp", "open", "high", "low", "close", "volume", "wap", "bar_count", "bar_size", "what_to_show", "use_rth", "source", "created_at_epoch", "updated_at_epoch"],
-            "single_day_run": ["run_id", "trade_date", "symbol", "mode", "live_phase", "direction", "parameter_set_id", "parameter_snapshot_json", "threshold_mode", "fixed_threshold", "threshold_update_rate", "status", "started_at_epoch", "ended_at_epoch", "error_type", "error_message", "recovery_count", "first_threshold", "processed_bar_count", "signal_count", "best_price", "best_order_price", "best_reward", "efficiency"],
-            "processed_1m_bar": PROCESSED_BAR_COLUMNS,
-            "signal_event": ["run_id", "date", "decision", "price", "break_count", "share", "remained_shares"],
-            "run_summary": ["run_id", "status", "processed_bar_count", "signal_count", "avg_signal_count_per_day", "avg_best_reward_per_day", "avg_efficiency_per_day", "max_signal_count_per_day", "max_best_reward_per_day", "max_efficiency_per_day", "started_at_epoch", "ended_at_epoch", "error_type", "error_message"],
-        }
-        actual_tables = {row[0] for row in self.connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall() if not row[0].startswith("sqlite_")}
-        if actual_tables != set(expected):
-            return False
-        for table, expected_columns in expected.items():
-            columns = [row[1] for row in self.connection.execute(f'PRAGMA table_info("{table}")').fetchall()]
-            if columns != expected_columns:
-                return False
-        for table, primary_key in {"single_day_run": ["run_id", "trade_date"], "processed_1m_bar": ["run_id", "date"], "run_summary": ["run_id"], "signal_event": ["run_id", "date"]}.items():
-            actual_primary_key = [row[1] for row in self.connection.execute(f'PRAGMA table_info("{table}")').fetchall() if row[5] > 0]
-            if actual_primary_key != primary_key:
-                return False
-        return True
-
-    def _drop_all(self) -> None:
-        tables = self.connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-        for row in tables:
-            if not row[0].startswith("sqlite_"):
-                self.connection.execute(f'DROP TABLE "{row[0]}"')
 
 
 def _epoch(value: datetime) -> int:
@@ -323,6 +286,70 @@ class SqliteRepositories:
             writer.writeheader()
             writer.writerows(processed_bar_row(record) for record in records)
         return destination
+
+    def export_processed_run_csv_from_database(self, run_id: str, output_dir: str | Path = Path("data")) -> Path:
+        destination = Path(output_dir) / f"{run_id}.csv"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        rows = self.database.connection.execute(
+            f"SELECT {', '.join(PROCESSED_BAR_COLUMNS)} FROM processed_1m_bar WHERE run_id=? ORDER BY date", (run_id,)
+        ).fetchall()
+        with destination.open("w", newline="", encoding="utf-8") as stream:
+            writer = csv.DictWriter(stream, fieldnames=PROCESSED_BAR_COLUMNS)
+            writer.writeheader()
+            writer.writerows(dict(row) for row in rows)
+        return destination
+
+
+MERGED_TABLES = ("trade_date", "raw_1m_bar", "single_day_run", "signal_event", "run_summary")
+
+
+def _quote(identifier: str) -> str:
+    return '"' + identifier.replace('"', '""') + '"'
+
+
+def merge_run_database(master_path: str | Path, temporary_path: str | Path) -> None:
+    """Merge a completed private run atomically, preserving master-only columns."""
+    Path(master_path).parent.mkdir(parents=True, exist_ok=True)
+    master = Database(master_path)
+    try:
+        master.initialize()
+        connection = master.connection
+        connection.execute("ATTACH DATABASE ? AS source", (str(temporary_path),))
+        try:
+            connection.execute("BEGIN")
+            for table in MERGED_TABLES:
+                source_info = connection.execute(f"PRAGMA source.table_info({_quote(table)})").fetchall()
+                target_info = connection.execute(f"PRAGMA main.table_info({_quote(table)})").fetchall()
+                if not source_info or not target_info:
+                    raise PersistenceError(f"Merge requires table {table} in both databases")
+                source_pk = [row[1] for row in source_info if row[5] > 0]
+                target_pk = [row[1] for row in target_info if row[5] > 0]
+                if source_pk != target_pk or not source_pk:
+                    raise PersistenceError(f"Incompatible primary key for merge table {table}")
+                target_columns = {row[1] for row in target_info}
+                for row in source_info:
+                    if row[1] not in target_columns:
+                        declared_type = f" {row[2]}" if row[2] else ""
+                        connection.execute(f"ALTER TABLE main.{_quote(table)} ADD COLUMN {_quote(row[1])}{declared_type}")
+                target_info = connection.execute(f"PRAGMA main.table_info({_quote(table)})").fetchall()
+                target_names = [row[1] for row in target_info]
+                source_names = {row[1] for row in source_info}
+                source_rows = connection.execute(f"SELECT * FROM source.{_quote(table)}").fetchall()
+                values = [tuple(row[name] if name in source_names else None for name in target_names) for row in source_rows]
+                if values:
+                    columns = ", ".join(_quote(name) for name in target_names)
+                    placeholders = ", ".join("?" for _ in target_names)
+                    updates = ", ".join(f"{_quote(name)}=excluded.{_quote(name)}" for name in target_names if name not in target_pk)
+                    conflict = f" ON CONFLICT ({', '.join(_quote(name) for name in target_pk)}) DO UPDATE SET {updates}" if updates else " ON CONFLICT DO NOTHING"
+                    connection.executemany(f"INSERT INTO main.{_quote(table)} ({columns}) VALUES ({placeholders}){conflict}", values)
+            connection.commit()
+        except (sqlite3.Error, PersistenceError) as exc:
+            connection.rollback()
+            raise PersistenceError(str(exc)) from exc
+        finally:
+            connection.execute("DETACH DATABASE source")
+    finally:
+        master.close()
 
 
 def processed_bar_row(value: ProcessedBarRecord) -> dict[str, object]:

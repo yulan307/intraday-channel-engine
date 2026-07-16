@@ -5,7 +5,8 @@ import argparse
 import json
 import math
 import time
-from dataclasses import dataclass
+import random
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
@@ -14,16 +15,17 @@ import yaml
 
 from ..bar_feed.live_paper_feed import LivePaperFeed
 from ..domain.enums import Direction, RunMode, ThresholdMode
-from ..domain.errors import GatewayConnectionError, InputValidationError, NonTradingDayError, RecoverableBarTimeout
+from ..domain.errors import ClientIdInUseError, GatewayConnectionError, InputValidationError, NonTradingDayError, RecoverableBarTimeout
 from ..domain.models import RunContext, TradingSession
 from ..domain.parameters import load_parameter_sets
 from ..domain.states import RuntimeState
 from ..ib.config import IbConfig
 from ..ib.gateway import IbApiGateway
-from ..persistence.database import Database, SqliteRepositories
+from ..persistence.database import Database, SqliteRepositories, merge_run_database
 from ..support.clock import Clock, SystemClock
 from ..support.ids import DefaultIdGenerator
 from ..support.logging import JsonLineLogger, TerminalMirrorLogger
+from ..support.windows_mutex import WindowsNamedMutex, merge_mutex_name, symbol_mutex_name
 from .single_day_runner import SingleDayRunner
 from .live_order_submitter import LiveOrderSubmitter
 from .startup_confirmation import print_and_confirm_launch
@@ -35,7 +37,7 @@ DEFAULT_LIVE_CONFIG = Path("configs/live_config.yaml")
 _LIVE_CONFIG_FIELDS = {
     "symbol", "direction", "threshold", "parameter_set_path",
     "parameter_set_id", "ib_environment", "trade_date", "threshold_update_rate",
-    "log_level", "shares",
+    "log_level", "shares", "temporary_directory",
 }
 
 
@@ -52,6 +54,7 @@ class LiveLaunchConfig:
     threshold_update_rate: float = 0.0
     log_level: str = "INFO"
     shares: tuple[int, ...] = ()
+    temporary_directory: Path = Path("data/runs")
 
 
 @dataclass(frozen=True)
@@ -127,6 +130,7 @@ def resolve_live_launch_config(args: argparse.Namespace) -> LiveLaunchConfig:
     threshold_update_rate_raw = values.get("threshold_update_rate")
     log_level = values.get("log_level")
     shares = selected("shares")
+    temporary_directory = values.get("temporary_directory")
     threshold_update_rate = parse_threshold_update_rate(threshold_update_rate_raw)
     if not isinstance(symbol, str) or not symbol.strip():
         raise InputValidationError("symbol is required")
@@ -159,12 +163,14 @@ def resolve_live_launch_config(args: argparse.Namespace) -> LiveLaunchConfig:
         raise InputValidationError("trade_date must be YYYY-MM-DD or null")
     if log_level not in {"INFO", "ERROR"}:
         raise InputValidationError("log_level must be INFO or ERROR")
+    if not isinstance(temporary_directory, (str, Path)) or not str(temporary_directory):
+        raise InputValidationError("temporary_directory is required")
     parsed_shares = _parse_shares(shares, from_cli=getattr(args, "shares", None) is not None)
     fixed_threshold = float(threshold) if threshold is not None else None
     return LiveLaunchConfig(
         symbol.strip(), parsed_direction, fixed_threshold,
         resolve_config_threshold_mode(fixed_threshold, threshold_update_rate_raw is not None), Path(parameter_set_path),
-        parameter_set_id.strip(), ib_environment, trade_date, threshold_update_rate, log_level, parsed_shares,
+        parameter_set_id.strip(), ib_environment, trade_date, threshold_update_rate, log_level, parsed_shares, Path(temporary_directory),
     )
 
 
@@ -211,6 +217,7 @@ def live_launch_configuration(config: LiveLaunchConfig) -> dict[str, object]:
         "trade_date": config.trade_date.isoformat() if config.trade_date else None,
         "log_level": config.log_level,
         "shares": list(config.shares),
+        "temporary_directory": str(config.temporary_directory),
     }
 
 
@@ -322,6 +329,29 @@ def wait_for_recovery(
     return clock.now_et() < session_end_et
 
 
+def new_process_client_ids(randint: Callable[[int, int], int] = random.randint) -> tuple[int, int]:
+    market = randint(1, 2_147_483_647)
+    order = randint(1, 2_147_483_647)
+    while order == market:
+        order = randint(1, 2_147_483_647)
+    return market, order
+
+
+def connect_with_client_id_retry(
+    make_gateway: Callable[[int], IbApiGateway], client_id: int, *, require_account: bool,
+    randint: Callable[[int, int], int] = random.randint,
+) -> tuple[IbApiGateway, int]:
+    for _ in range(32):
+        gateway = make_gateway(client_id)
+        try:
+            gateway.connect_gateway(require_account=require_account)
+            return gateway, client_id
+        except ClientIdInUseError:
+            gateway.disconnect_gateway()
+            client_id = randint(1, 2_147_483_647)
+    raise GatewayConnectionError("IBAPI client ID collision retry limit (32) exhausted")
+
+
 def execute_live(
     args: argparse.Namespace,
     clock: Clock,
@@ -329,27 +359,38 @@ def execute_live(
     sleep: Callable[[float], None] = time.sleep,
 ) -> None:
     config = resolve_live_launch_config(args)
-    reporter.use_logger(JsonLineLogger(args.log_dir / "startup.jsonl", clock, config.log_level))
     print_and_confirm_launch("Live", live_launch_configuration(config))
     parameter_sets = load_parameter_sets(config.parameter_set_path, config.parameter_set_id)
     if len(parameter_sets) != 1:
         raise InputValidationError("Live Paper requires exactly one parameter set")
     parameter_set = parameter_sets[0]
-    args.database.parent.mkdir(parents=True, exist_ok=True)
-    database = Database(args.database)
-    database.initialize()
-    repositories = SqliteRepositories(database)
-    gateway = IbApiGateway(IbConfig.from_yaml(args.ib_config, config.ib_environment, "market"), TerminalMirrorLogger(reporter.logger))
-    order_gateway = IbApiGateway(IbConfig.from_yaml(args.ib_config, config.ib_environment, "order"), TerminalMirrorLogger(reporter.logger))
+    base_market_config = IbConfig.from_yaml(args.ib_config, config.ib_environment, "market")
+    base_order_config = IbConfig.from_yaml(args.ib_config, config.ib_environment, "order")
+    market_client_id, order_client_id = new_process_client_ids()
+    symbol_lock = WindowsNamedMutex(
+        symbol_mutex_name(config.ib_environment, base_market_config.host, base_market_config.port, config.symbol),
+        wait=False, purpose="symbol",
+    )
+    database: Database | None = None
+    repositories: SqliteRepositories | None = None
+    gateway: IbApiGateway | None = None
+    order_gateway: IbApiGateway | None = None
     feed: LivePaperFeed | None = None
     context: RunContext | None = None
     state: RuntimeState | None = None
     logger: JsonLineLogger | None = None
     run_created = False
     try:
-        gateway.connect_gateway()
+      with symbol_lock:
+        # A memory repository resolves the session before the formal run ID and private file exist.
+        session_database = Database(":memory:")
+        session_database.initialize()
+        session_repositories = SqliteRepositories(session_database)
+        gateway, market_client_id = connect_with_client_id_retry(
+            lambda client_id: IbApiGateway(replace(base_market_config, client_id=client_id), TerminalMirrorLogger(reporter.logger)), market_client_id, require_account=False,
+        )
         now = clock.now_et()
-        resolution = resolve_live_session(repositories, gateway, config.symbol, config.trade_date, now)
+        resolution = resolve_live_session(session_repositories, gateway, config.symbol, config.trade_date, now)
         session = resolution.session
         started_at_et = clock.now_et().replace(microsecond=0)
         run_id = DefaultIdGenerator().new_run_id(
@@ -365,8 +406,15 @@ def execute_live(
         reporter.use_logger(logger)
         run_logger = TerminalMirrorLogger(logger)
         gateway.set_logger(run_logger)
-        order_gateway.set_logger(run_logger)
-        order_gateway.connect_gateway(require_account=True)
+        order_gateway, order_client_id = connect_with_client_id_retry(
+            lambda client_id: IbApiGateway(replace(base_order_config, client_id=client_id), run_logger), order_client_id, require_account=True,
+        )
+        config.temporary_directory.mkdir(parents=True, exist_ok=True)
+        database = Database(config.temporary_directory / f"{run_id}.sqlite3")
+        database.initialize()
+        repositories = SqliteRepositories(database)
+        repositories.save(session)
+        session_database.close()
         gateway.disconnect_gateway()
         order_gateway.disconnect_gateway()
         repositories.create(context)
@@ -409,6 +457,7 @@ def execute_live(
                     )
 
                 feed = LivePaperFeed(config.symbol, session, gateway, repositories, clock, heartbeat, run_logger)
+                assert database is not None and repositories is not None
                 summary = SingleDayRunner(database, repositories, clock, run_logger).execute_run(
                     context, feed, state, create_run=False, on_first_bar_confirmed=feed.mark_first_bar_confirmed,
                     session=session, order_submitter=order_submitter, recovery=recovery,
@@ -420,9 +469,17 @@ def execute_live(
                     "processed_bar_count": summary.processed_bar_count,
                     "signal_count": summary.signal_count,
                 }))
+                if summary.status.value == "COMPLETED":
+                    with WindowsNamedMutex(merge_mutex_name(args.database), wait=True, purpose="master database merge"):
+                        merge_run_database(args.database, database.path)
+                    repositories.export_processed_run_csv_from_database(context.run_id)
+                    database.close()
+                    database = None
+                    Path(config.temporary_directory / f"{run_id}.sqlite3").unlink()
                 return
             except (RecoverableBarTimeout, GatewayConnectionError) as exc:
                 recovery_count += 1
+                assert repositories is not None
                 repositories.increment_recovery_count(context.run_id, context.trade_date)
                 restored = repositories.latest_remaining_shares(context.run_id)
                 remaining_shares = config.shares if restored is None else restored
@@ -448,6 +505,7 @@ def execute_live(
         raise ended_error
     except Exception as exc:
         if run_created and context is not None and state is not None:
+            assert repositories is not None
             summary = build_failed_summary(context, state, exc, clock.now_et())
             try:
                 repositories.fail_with_summary(summary)
@@ -459,15 +517,18 @@ def execute_live(
     finally:
         if feed is not None:
             feed.close()
-        gateway.disconnect_gateway()
-        order_gateway.disconnect_gateway()
-        database.close()
+        if gateway is not None:
+            gateway.disconnect_gateway()
+        if order_gateway is not None:
+            order_gateway.disconnect_gateway()
+        if database is not None:
+            database.close()
 
 
 def main() -> None:
     args = _args()
     clock = SystemClock()
-    reporter = LiveCliReporter(JsonLineLogger(args.log_dir / "startup.jsonl", clock))
+    reporter = LiveCliReporter(JsonLineLogger(args.log_dir / "UNKNOWN_UNKNOWN_UNKNOWN.jsonl", clock))
     try:
         execute_live(args, clock, reporter)
     except InputValidationError as exc:

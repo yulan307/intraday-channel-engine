@@ -42,7 +42,7 @@ class Gateway:
         self.session = session
         self.connected = False
 
-    def connect_gateway(self) -> None:
+    def connect_gateway(self, *, require_account: bool = False) -> None:
         self.connected = True
 
     def disconnect_gateway(self) -> None:
@@ -124,7 +124,7 @@ def test_main_converts_invalid_yaml_to_logged_exit_code_two(tmp_path: Path, monk
 
     assert raised.value.code == 2
     assert capsys.readouterr().out == f"ERROR: Live config {config} has unsupported fields: unexpected\n"
-    event = json.loads((tmp_path / "logs" / "startup.jsonl").read_text(encoding="utf-8").strip())
+    event = json.loads((tmp_path / "logs" / "UNKNOWN_UNKNOWN_UNKNOWN.jsonl").read_text(encoding="utf-8").strip())
     assert event["event"] == "input_validation_error"
 
 
@@ -143,7 +143,7 @@ def test_main_converts_invalid_effective_config_to_logged_exit_code_two(tmp_path
 
     assert raised.value.code == 2
     assert capsys.readouterr().out == "ERROR: threshold must be numeric, null, or omitted\n"
-    event = json.loads((tmp_path / "logs" / "startup.jsonl").read_text(encoding="utf-8").strip())
+    event = json.loads((tmp_path / "logs" / "UNKNOWN_UNKNOWN_UNKNOWN.jsonl").read_text(encoding="utf-8").strip())
     assert event["event"] == "input_validation_error"
 
 
@@ -170,5 +170,5 @@ def test_main_converts_invalid_requested_date_to_logged_exit_code_two(tmp_path: 
 
     assert raised.value.code == 2
     assert "ERROR: trade_date must not be earlier than today's ET date" in capsys.readouterr().out
-    event = json.loads((tmp_path / "logs" / "startup.jsonl").read_text(encoding="utf-8").strip())
+    event = json.loads((tmp_path / "logs" / "UNKNOWN_UNKNOWN_UNKNOWN.jsonl").read_text(encoding="utf-8").strip())
     assert event["event"] == "input_validation_error"

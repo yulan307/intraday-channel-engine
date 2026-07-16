@@ -5,8 +5,10 @@ existing BarFeed, Trend, Channel, and Decision engine behavior while adding an
 outer parameter-set and multi-date scan flow.
 
 The root-level `run_backtest.ps1` and `run_live.ps1` launch their respective
-CLI through the project `.venv`, run from the project root, and forward every
-argument unchanged, including `--help` and YAML-field overrides.
+CLI through the project `.venv` and run from the project root. Their optional
+first positional argument is a YAML filename in `configs/` (for example,
+`run_live.ps1 MU.yaml`); the scripts translate it to Python's `--config`
+argument. Remaining arguments are forwarded as CLI overrides.
 
 Implemented scope:
 
@@ -18,8 +20,18 @@ Implemented scope:
   signal triggers, and otherwise is `BUY` or `SELL`. There are no JSON payload
   columns and no persisted `_et` columns.
 - The SQLite schema is `backtest_csv_statistics_v1`. Initialization verifies its shape;
-  any incompatible Phase 3 tables are cleared and recreated together. Existing
-  data is intentionally not migrated or retained.
+  it creates missing tables only and never clears or rebuilds existing data for
+  schema or column differences.
+
+- Phase 8 runs one manually started Windows Live Paper process per different
+  symbol. Each uses required `temporary_directory/<run_id>.sqlite3`, a normal
+  run JSONL after validation, a per-symbol mutex, and distinct random positive
+  client IDs reused during recovery. IBAPI 326 retries only the colliding
+  connection up to 32 attempts. Invalid validation writes only an UNKNOWN JSONL.
+- Only a completed post-close `BAR_END` private database merges into `--database`
+  under a merge mutex. It source-wins upserts the retained tables, exports the
+  Backtest-compatible processed CSV, and then deletes the private database.
+  Failed, incomplete, or stopped runs retain it without merge.
 - Backtest startup is YAML-first through the local `configs/backtest.yaml`; the
   tracked setup template is `configs/backtest_config_sample.yaml`. Explicit
   `backtest_cli` options override only their matching YAML field. The YAML

@@ -341,7 +341,7 @@ def test_scanner_skips_non_trading_day_and_exports_one_multi_day_csv(tmp_path) -
     assert tuple(aggregate) == ("COMPLETED", 0.0, None, None)
 
 
-def test_schema_shape_mismatch_is_rebuilt_and_processed_fields_are_exact(tmp_path) -> None:
+def test_schema_shape_mismatch_preserves_existing_columns_and_rows(tmp_path) -> None:
     path = tmp_path / "shape.sqlite3"
     database = Database(path)
     database.initialize()
@@ -349,7 +349,7 @@ def test_schema_shape_mismatch_is_rebuilt_and_processed_fields_are_exact(tmp_pat
     database.connection.commit()
     database.initialize()
     columns = [row[1] for row in database.connection.execute("PRAGMA table_info(processed_1m_bar)")]
-    assert "unexpected" not in columns
+    assert "unexpected" in columns
     assert "initial_threshold" not in columns
     assert columns[15] == "active_threshold"
 

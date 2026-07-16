@@ -140,14 +140,15 @@ def test_invalid_ibapi_day_is_not_persisted(tmp_path) -> None:
     assert repos.load_rth_bars("AAPL", _session().trade_date) == []
 
 
-def test_nonconforming_schema_is_cleared_once(tmp_path) -> None:
+def test_nonconforming_schema_is_not_cleared(tmp_path) -> None:
     path = tmp_path / "legacy.sqlite3"
     sqlite3.connect(path).execute("CREATE TABLE raw_1m_bar (timestamp TEXT)").connection.commit()
     database = Database(path); database.initialize()
     assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "live_recovery_v1"
+    assert [row[1] for row in database.connection.execute("PRAGMA table_info(raw_1m_bar)")] == ["timestamp"]
 
 
-def test_previous_phase3_schema_is_cleared_once_and_recreated(tmp_path) -> None:
+def test_previous_schema_version_is_preserved_without_rebuild(tmp_path) -> None:
     path = tmp_path / "previous_phase3.sqlite3"
     database = Database(path)
     database.initialize()
@@ -157,8 +158,8 @@ def test_previous_phase3_schema_is_cleared_once_and_recreated(tmp_path) -> None:
     database.connection.execute("UPDATE schema_meta SET value='phase3_ibapi_v4' WHERE key='schema_version'")
     database.connection.commit()
     database.initialize()
-    assert database.connection.execute("SELECT COUNT(*) FROM raw_1m_bar").fetchone()[0] == 0
-    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "live_recovery_v1"
+    assert database.connection.execute("SELECT COUNT(*) FROM raw_1m_bar").fetchone()[0] == 1
+    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "phase3_ibapi_v4"
     columns = {row[1] for row in database.connection.execute("PRAGMA table_info(processed_1m_bar)")}
     assert {"date", "timestamp", "wap", "bar_count", "bar_size", "what_to_show", "use_rth", "source", "trend_slope", "channel_window", "channel_pred_high", "decision_triggered"} <= columns
     assert not {"slope_std_window", "dev_window", "residual_window"} & columns

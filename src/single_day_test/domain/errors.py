@@ -22,6 +22,14 @@ class GatewayConnectionError(IbApiError):
     pass
 
 
+class ClientIdInUseError(GatewayConnectionError):
+    pass
+
+
+class LiveProcessAlreadyRunningError(InputValidationError):
+    pass
+
+
 class HistoricalDataError(SingleDayTestError):
     pass
 
