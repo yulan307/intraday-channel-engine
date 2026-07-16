@@ -2653,8 +2653,10 @@ status FAILED; skipped dates do not.
 The Live CLI closes both IBAPI gateways after pre-market session/account reads
 and reconnects them only after market open. System connection notifications are
 logged without cancelling the Live subscription. Feed output uses a five-minute
-deadline after the expected Bar time (`session_start` for the first Bar and
-`session_end` for the final Bar). A timeout restarts the same `run_id`: it
+deadline after the expected Bar time. Before the first historical callback of
+an in-session subscription, the first deadline is
+`max(session_start, subscription_start) + 5 minutes`; later deadlines follow
+the completed-Bar sequence and the final expectation is `session_end`. A timeout restarts the same `run_id`: it
 closes both gateways, restores shares from the latest `signal_event` snapshot,
 increments `single_day_run.recovery_count`, reconnects, and replays from session
 start. Replay upserts raw and processed Bars, leaves `signal_event` insert-only,

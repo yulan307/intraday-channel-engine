@@ -163,7 +163,9 @@ Live connection recovery is implemented. Pre-market market/session and account
 reads close both gateways before session waiting; market-open processing creates
 fresh connections. IBAPI system connection notifications are audit logs, not
 direct Feed failures. A missing completed Bar past its expected time plus five
-minutes raises a recoverable timeout. The Live CLI closes both gateways,
+minutes raises a recoverable timeout. Before the first recovered historical Bar,
+the expected time is `max(session_start, Feed subscription start)`; subsequent
+expected times follow the completed-Bar sequence. The Live CLI closes both gateways,
 restores remaining shares from the latest persisted `signal_event` (or the YAML
 list when no event exists), increments `single_day_run.recovery_count`, and
 replays the same `run_id` from session start. Recovery upserts raw and processed

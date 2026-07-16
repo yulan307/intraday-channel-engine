@@ -179,12 +179,28 @@ def test_live_feed_uses_session_deadlines_when_runner_waits_without_timeout(tmp_
 
 
 def test_live_feed_raises_recoverable_timeout_five_minutes_after_session_expectation(tmp_path) -> None:
-    clock = Clock(datetime(2025, 1, 2, 9, 40, tzinfo=ET))
+    clock = Clock(datetime(2025, 1, 2, 9, 30, tzinfo=ET))
     session = TradingSession(date(2025, 1, 2), True, datetime(2025, 1, 2, 9, 30, tzinfo=ET), datetime(2025, 1, 2, 9, 35, tzinfo=ET))
     database = Database(tmp_path / "bar-timeout.sqlite3"); database.initialize(); repos = SqliteRepositories(database)
     feed = LivePaperFeed("AAPL", session, Gateway(), repos, clock)
+    feed.start()
+    clock.value = datetime(2025, 1, 2, 9, 40, tzinfo=ET)
 
     with pytest.raises(RecoverableBarTimeout, match="Timed out waiting"):
+        feed.next_event()
+
+
+def test_live_feed_waits_five_minutes_from_mid_session_start_for_first_history(tmp_path) -> None:
+    clock = Clock(datetime(2025, 1, 2, 12, 19, 59, tzinfo=ET))
+    session = TradingSession(date(2025, 1, 2), True, datetime(2025, 1, 2, 9, 30, tzinfo=ET), datetime(2025, 1, 2, 16, 0, tzinfo=ET))
+    database = Database(tmp_path / "mid-session-first-history.sqlite3"); database.initialize(); repos = SqliteRepositories(database)
+    feed = LivePaperFeed("AAPL", session, Gateway(), repos, clock)
+
+    feed.start()
+    assert feed.next_event().status is FeedStatus.BAR_WAITING
+    clock.value += timedelta(minutes=5)
+
+    with pytest.raises(RecoverableBarTimeout, match="12:24:59"):
         feed.next_event()
 
 

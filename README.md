@@ -37,7 +37,10 @@ classifies `HIST` / `LIVE` / `END` at consumption time, persists that result,
 then processes, submits eligible orders, persists the Bar and signal, and
 advances strategy state.
 
-Live recovers the same `run_id` after a five-minute completed-Bar timeout. IBAPI
+Live recovers the same `run_id` after a five-minute completed-Bar timeout. For
+the first historical callback of an in-session Feed start, that deadline is
+`max(session_start, subscription_start) + 5 minutes`; later deadlines use the
+next expected completed Bar. IBAPI
 system connection messages are logged but do not directly cancel a Live
 subscription. Recovery closes both gateways, restores remaining shares from the
 latest `signal_event` (or configuration when no event exists), reconnects, and
