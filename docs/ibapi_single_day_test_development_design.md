@@ -2664,7 +2664,32 @@ and submits no orders for replayed HIST Bars. Retry delays are 20 seconds, one
 minute, 15 minutes, then one hour until session close; an unrecovered Run is
 FAILED. `signal_event` adds nullable `share` and JSON `remained_shares`; SQLite
 write failures terminate the Run.
-# Phase 8 update: Live Paper supports independent processes for different
-# symbols through Windows named mutexes, private run SQLite files, random
-# per-process client IDs, and completed-run master merge/CSV export. Ordinary
-# SQLite initialization is non-destructive and never rebuilds schema-drift data.
+# Phase 8 — Concurrent Live Paper Runtime Design
+
+Phase 8 retains the Phase 7 strategy, order-submission boundary, same-`run_id`
+recovery, historical replay, and remaining-share restoration. It adds only
+process isolation for different symbols.
+
+Each manually started Live process receives distinct random positive signed
+32-bit market and order client IDs. They are reused for all reconnect/recovery
+actions. IBAPI error 326 regenerates only the colliding connection ID, with a
+32-attempt limit; all other connection errors retain Phase 7 handling.
+
+Before TWS or SQLite access, the process acquires a Windows named mutex derived
+from IB environment, host, port, and canonical symbol. A duplicate process is
+rejected. A second named mutex serializes master-database merge operations.
+
+Valid launches write `<run_id>.jsonl` and persist only to
+`temporary_directory/<run_id>.sqlite3`; invalid validation writes an
+`UNKNOWN_UNKNOWN_UNKNOWN.jsonl` and creates neither database nor
+`single_day_run`. SQLite initialization creates missing files/tables only and
+never drops, rebuilds, or repairs an existing table for schema differences.
+
+On a completed post-close `BAR_END`, the private database atomically source-wins
+upserts `trade_date`, `raw_1m_bar`, `single_day_run`, `signal_event`, and
+`run_summary` into the master `--database`. `schema_meta` and
+`processed_1m_bar` never merge. Missing nullable target columns are added;
+incompatible primary keys or other non-column differences fail the merge and
+retain the private database. After merge, processed bars export to the existing
+`data/<run_id>.csv` format, then the private database is deleted. Every other
+terminal path retains it without merging.

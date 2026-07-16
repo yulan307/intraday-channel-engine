@@ -1,5 +1,7 @@
 # Revision History
 
+| 2026-07-17 | Phase 8 current-state documentation and `docs/archive/phase8_draft.md` | Consolidated the implemented Phase 8 design, flow, and plan into maintained current-state documents. Moved the historical decision draft to the ignored archive and removed it from Git tracking. | Updated development design, flow design, phase plan, and this revision history. |
+
 | 2026-07-17 | `.gitignore`, `configs/ib_config_sample.yaml`, and Git tracking for `configs/ib.yaml` | Restricted tracked configuration artifacts to `*_sample.yaml` and `*_sample.csv`; added the IB profile sample and made the actual IB profile local-only. | Updated README and CONTEXT. |
 
 | 2026-07-17 | `run_live.ps1`, `run_backtest.ps1` | Changed launcher YAML selection to an optional first filename under `configs/`; the scripts internally pass the corresponding Python `--config` argument and preserve remaining CLI overrides. | Updated README and CONTEXT. |
