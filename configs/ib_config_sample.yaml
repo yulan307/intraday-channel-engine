@@ -1,4 +1,4 @@
-# TWS connection profiles. Select one with --ib-environment paper|live.
+# Copy to configs/ib.yaml and adjust host/port/client IDs for the local TWS or Gateway.
 paper:
   host: 127.0.0.1
   port: 7497

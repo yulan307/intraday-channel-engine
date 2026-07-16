@@ -10,6 +10,10 @@ first positional argument is a YAML filename in `configs/` (for example,
 `run_live.ps1 MU.yaml`); the scripts translate it to Python's `--config`
 argument. Remaining arguments are forwarded as CLI overrides.
 
+Only `configs/*_sample.yaml` and `configs/*_sample.csv` are tracked. Copy the
+appropriate sample to create local runtime files, including
+`configs/ib_config_sample.yaml` to `configs/ib.yaml`.
+
 Implemented scope:
 
 - Raw market data remains canonical IBAPI-shaped data: UTC epoch `date`, OHLC,

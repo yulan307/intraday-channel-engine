@@ -84,8 +84,9 @@ up a checkout. Start without
 strategy arguments to use that YAML file; an explicitly supplied CLI option
 overrides only its matching YAML field. `trade_date` is an optional ET date and
 maps to `--trade-date`; null selects today or the next tradable session after
-today's close. `ib_environment` selects the existing paper/live connection
-profile in `configs/ib.yaml`. `shares` is required; each list value is the
+today's close. `ib_environment` selects the paper/live connection profile in
+the local `configs/ib.yaml` (copy `configs/ib_config_sample.yaml` first).
+`shares` is required; each list value is the
 next submission quantity.
 
 Both CLI entrypoints print their validated, merged launch configuration and
@@ -185,6 +186,7 @@ cleared and recreated; no old data is migrated or retained.
 
 Install the official IBKR TWS API Python client before running this project.
 The PyPI `ibapi==9.81.1.post1` package is too old for `SCHEDULE` and must not
-be used. Configure `configs/ib.yaml` with paper/live TWS profiles and separate
+be used. Copy `configs/ib_config_sample.yaml` to the local `configs/ib.yaml`,
+then configure paper/live TWS profiles and separate
 market/order client IDs. Fill tracking, reconciliation, and checkpointing are
 outside this scope.

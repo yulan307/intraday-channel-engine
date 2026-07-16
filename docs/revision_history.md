@@ -1,5 +1,7 @@
 # Revision History
 
+| 2026-07-17 | `.gitignore`, `configs/ib_config_sample.yaml`, and Git tracking for `configs/ib.yaml` | Restricted tracked configuration artifacts to `*_sample.yaml` and `*_sample.csv`; added the IB profile sample and made the actual IB profile local-only. | Updated README and CONTEXT. |
+
 | 2026-07-17 | `run_live.ps1`, `run_backtest.ps1` | Changed launcher YAML selection to an optional first filename under `configs/`; the scripts internally pass the corresponding Python `--config` argument and preserve remaining CLI overrides. | Updated README and CONTEXT. |
 
 | 2026-07-16 | `live_cli.py`, IB gateway, SQLite persistence, Windows mutex support, Live YAML/configs, and Phase 8 tests | Implemented independent different-symbol Live Paper runs: private run databases, per-process client IDs with 326 retry, symbol/merge mutexes, completed-run atomic source-wins merge, processed CSV export, and retention on incomplete/failure paths. SQLite initialization is now non-destructive for all callers. | Updated README, CONTEXT, Phase 8 draft, and current-state design/flow/phase-plan documents. |

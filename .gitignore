@@ -9,10 +9,11 @@ build/
 dist/
 data/*.sqlite3
 
-# Local runtime configuration and generated data.
-configs/backtest.yaml
-configs/live_config.yaml
-configs/parameter_set.csv
+# Local runtime configuration and generated data. Only sample configurations
+# are versioned; copy a sample to create a local runtime file.
+configs/*
+!configs/*_sample.yaml
+!configs/*_sample.csv
 data/
 
 # Locally maintained planning archives; do not publish them to GitHub.
