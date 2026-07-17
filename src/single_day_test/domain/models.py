@@ -156,6 +156,11 @@ class ChannelResult:
     curr_high_percentile: float | None
     curr_low_percentile: float | None
     channel_stack_length_after: int
+    last_pred_high: float | None = None
+    last_pred_low: float | None = None
+    curr_pred_high: float | None = None
+    curr_pred_low: float | None = None
+    mix: float | None = None
 
 
 @dataclass(frozen=True)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import exp
 from typing import Sequence
 
 import numpy as np
@@ -18,6 +19,58 @@ class CurrentChannelModel:
     intercept: float
     high_percentile: float
     low_percentile: float
+
+
+def calculate_current_prediction(
+    model: CurrentChannelModel | None,
+    channel_stack_length: int,
+    params: ParameterSet,
+) -> tuple[float | None, float | None]:
+    """Predict the current bar from the delayed current-model prefix."""
+    delay = params.trend_window // 2
+    if model is None or channel_stack_length <= delay:
+        return None, None
+    forward_count = (
+        channel_stack_length - delay
+        if channel_stack_length <= 2 * delay
+        else delay
+    )
+    center = model.slope * forward_count + model.intercept
+    return center + model.high_percentile, center - model.low_percentile
+
+
+def normalized_time_mix(channel_stack_length: int, params: ParameterSet) -> float:
+    """Return a k=4 sigmoid normalized to exactly span [0, 1]."""
+    delay = params.trend_window // 2
+    if channel_stack_length <= delay:
+        return 0.0
+    if channel_stack_length >= 2 * delay:
+        return 1.0
+    progress = (channel_stack_length - delay) / delay
+    steepness = 4.0
+    start = 1.0 / (1.0 + exp(steepness / 2.0))
+    end = 1.0 / (1.0 + exp(-steepness / 2.0))
+    value = 1.0 / (1.0 + exp(-steepness * (progress - 0.5)))
+    return (value - start) / (end - start)
+
+
+def blend_predictions(
+    last_pred_high: float | None,
+    last_pred_low: float | None,
+    curr_pred_high: float | None,
+    curr_pred_low: float | None,
+    mix: float,
+) -> tuple[float | None, float | None, float | None]:
+    """Keep first-segment predictions empty and blend only complete pairs."""
+    if last_pred_high is None or last_pred_low is None:
+        return None, None, None
+    if curr_pred_high is None or curr_pred_low is None:
+        return last_pred_high, last_pred_low, None
+    return (
+        last_pred_high * (1.0 - mix) + curr_pred_high * mix,
+        last_pred_low * (1.0 - mix) + curr_pred_low * mix,
+        mix,
+    )
 
 
 def select_current_model_bars(
@@ -82,7 +135,7 @@ class ChannelEngine:
         state: ChannelState,
         params: ParameterSet,
     ) -> tuple[ChannelResult, ChannelState]:
-        pred_high, pred_low, predicted_count = self._calculate_prediction(state)
+        last_pred_high, last_pred_low, predicted_count = self._calculate_prediction(state)
         next_state = ChannelState(
             bars=list(state.bars),
             effective_trend=state.effective_trend,
@@ -130,6 +183,16 @@ class ChannelEngine:
             select_current_model_bars(next_state.bars, params), params
         )
         self._set_current_model(next_state, current_model)
+        curr_pred_high, curr_pred_low = calculate_current_prediction(
+            current_model, len(next_state.bars), params
+        )
+        pred_high, pred_low, mix = blend_predictions(
+            last_pred_high,
+            last_pred_low,
+            curr_pred_high,
+            curr_pred_low,
+            normalized_time_mix(len(next_state.bars), params) * params.curr_mix_ratio,
+        )
         return (
             ChannelResult(
                 pred_high=pred_high,
@@ -145,6 +208,11 @@ class ChannelEngine:
                 curr_high_percentile=next_state.curr_high_percentile,
                 curr_low_percentile=next_state.curr_low_percentile,
                 channel_stack_length_after=len(next_state.bars),
+                last_pred_high=last_pred_high,
+                last_pred_low=last_pred_low,
+                curr_pred_high=curr_pred_high,
+                curr_pred_low=curr_pred_low,
+                mix=mix,
             ),
             next_state,
         )

@@ -14,6 +14,7 @@ class ParameterSet:
     channel_low_percentile: float
     continuous_break_count: int
     is_active: int = 1
+    curr_mix_ratio: float = 1.0
 
 
 def load_parameter_sets(path: str | Path, parameter_set_id: str | None = None) -> list[ParameterSet]:
@@ -21,7 +22,7 @@ def load_parameter_sets(path: str | Path, parameter_set_id: str | None = None) -
     required = {
         "parameter_set_id", "trend_window", "channel_window", "r2_threshold",
         "channel_high_percentile",
-        "channel_low_percentile", "continuous_break_count", "is_active",
+        "channel_low_percentile", "continuous_break_count", "curr_mix_ratio", "is_active",
     }
     try:
         with Path(path).open(newline="", encoding="utf-8") as stream:
@@ -43,6 +44,7 @@ def load_parameter_sets(path: str | Path, parameter_set_id: str | None = None) -
                 channel_high_percentile=float(row["channel_high_percentile"]),
                 channel_low_percentile=float(row["channel_low_percentile"]),
                 continuous_break_count=int(row["continuous_break_count"]), is_active=int(row["is_active"]),
+                curr_mix_ratio=float(row["curr_mix_ratio"]),
             )
             validate_parameter_set(params)
             params_list.append(params)
@@ -82,4 +84,8 @@ def validate_parameter_set(params: ParameterSet) -> None:
     if params.continuous_break_count < 1:
         raise InputValidationError(
             f"continuous_break_count must be >= 1, got {params.continuous_break_count}"
+        )
+    if not (0.0 <= params.curr_mix_ratio <= 1.0):
+        raise InputValidationError(
+            f"curr_mix_ratio must be between 0 and 1 inclusive, got {params.curr_mix_ratio}"
         )

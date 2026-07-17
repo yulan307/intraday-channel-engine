@@ -13,7 +13,11 @@ from single_day_test.domain.parameters import ParameterSet
 from single_day_test.domain.states import ChannelState, DecisionState, TrendState
 from single_day_test.engine.channel_engine import (
     ChannelEngine,
+    CurrentChannelModel,
+    blend_predictions,
+    calculate_current_prediction,
     calculate_current_model,
+    normalized_time_mix,
     select_current_model_bars,
 )
 from single_day_test.engine.decision_engine import DecisionEngine
@@ -180,6 +184,36 @@ def test_channel_current_model_uses_delayed_oldest_stack_window(
     assert [bar.price for bar in selected] == [
         float(index) for index in range(expected_count)
     ]
+
+
+def test_channel_current_prediction_uses_delayed_forward_distance() -> None:
+    model = CurrentChannelModel(
+        slope=2.0,
+        intercept=10.0,
+        high_percentile=5.0,
+        low_percentile=3.0,
+    )
+    channel_params = params(trend_window=10, channel_window=30)
+
+    assert calculate_current_prediction(model, 5, channel_params) == (None, None)
+    assert calculate_current_prediction(model, 6, channel_params) == pytest.approx((17.0, 9.0))
+    assert calculate_current_prediction(model, 10, channel_params) == pytest.approx((25.0, 17.0))
+    assert calculate_current_prediction(model, 11, channel_params) == pytest.approx((25.0, 17.0))
+
+
+def test_channel_normalized_time_mix_has_exact_delay_endpoints() -> None:
+    channel_params = params(trend_window=10, channel_window=30)
+
+    assert normalized_time_mix(5, channel_params) == 0.0
+    assert normalized_time_mix(10, channel_params) == 1.0
+    assert 0.0 < normalized_time_mix(7, channel_params) < 1.0
+
+
+def test_channel_blend_preserves_last_warmup_and_ratio_endpoints() -> None:
+    assert blend_predictions(None, None, 12.0, 8.0, 1.0) == (None, None, None)
+    assert blend_predictions(10.0, 6.0, None, None, 0.5) == (10.0, 6.0, None)
+    assert blend_predictions(10.0, 6.0, 14.0, 2.0, 0.0) == (10.0, 6.0, 0.0)
+    assert blend_predictions(10.0, 6.0, 14.0, 2.0, 1.0) == (14.0, 2.0, 1.0)
 
 
 def test_channel_switch_keeps_current_prediction_and_promotes_old_model() -> None:

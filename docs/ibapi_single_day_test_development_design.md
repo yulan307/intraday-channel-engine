@@ -2624,8 +2624,9 @@ subscription. Other error categories retain their explicit local handling.
 
 ## 30. Current run statistics storage
 
-The database schema is `backtest_csv_statistics_v1` and is deliberately rebuilt
-when its shape differs. `raw_1m_bar.timestamp` is a minute-rounded,
+The database schema metadata is `channel_mix_v1`; initialization creates missing
+tables without rebuilding existing data and forward-adds dedicated Channel-mix
+processed-bar columns when absent. `raw_1m_bar.timestamp` is a minute-rounded,
 America/New_York-aware ISO timestamp in addition to the canonical IBAPI epoch
 `date`.
 
@@ -2693,3 +2694,15 @@ incompatible primary keys or other non-column differences fail the merge and
 retain the private database. After merge, processed bars export to the existing
 `data/<run_id>.csv` format, then the private database is deleted. Every other
 terminal path retains it without merging.
+
+## Channel blended prediction
+
+`curr_mix_ratio` is a required `ParameterSet` CSV field in `[0, 1]`. Channel
+returns raw `last_pred_high` / `last_pred_low`, raw `curr_pred_high` /
+`curr_pred_low`, and applied `mix` alongside final `pred_high` / `pred_low`.
+The latter remains the only Decision input. With `delay = trend_window // 2`,
+current predictions are null for `n <= delay`, use forward coordinate
+`n - delay` through `n <= 2 * delay`, and use `delay` afterward. When both
+pairs exist, `pred = last * (1 - mix) + curr * mix`; `mix` is
+`curr_mix_ratio` times a k=4 sigmoid normalized to exactly 0 at `n = delay`
+and 1 at `n = 2 * delay`. No last model leaves final predictions null.

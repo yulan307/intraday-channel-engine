@@ -142,6 +142,8 @@ def test_parameter_set_valid_boundaries():
     validate_parameter_set(_make_params(channel_low_percentile=0.0))
     validate_parameter_set(_make_params(channel_low_percentile=100.0))
     validate_parameter_set(_make_params(continuous_break_count=1))
+    validate_parameter_set(_make_params(curr_mix_ratio=0.0))
+    validate_parameter_set(_make_params(curr_mix_ratio=1.0))
 
 
 def test_parameter_set_invalid_trend_window():
@@ -187,6 +189,12 @@ def test_parameter_set_invalid_low_percentile_above():
 def test_parameter_set_invalid_continuous_break_count():
     with pytest.raises(InputValidationError, match="continuous_break_count"):
         validate_parameter_set(_make_params(continuous_break_count=0))
+
+
+@pytest.mark.parametrize("ratio", (-0.1, 1.1))
+def test_parameter_set_invalid_curr_mix_ratio(ratio):
+    with pytest.raises(InputValidationError, match="curr_mix_ratio"):
+        validate_parameter_set(_make_params(curr_mix_ratio=ratio))
 
 
 # ---------------------------------------------------------------------------

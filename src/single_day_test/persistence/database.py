@@ -13,14 +13,15 @@ from ..domain.enums import RunStatus
 from ..domain.errors import PersistenceError
 from ..domain.models import ProcessedBarRecord, RawBar, RunContext, RunSummary, SignalEvent, TradingSession
 
-SCHEMA_VERSION = "live_recovery_v1"
+SCHEMA_VERSION = "channel_mix_v1"
 
 PROCESSED_BAR_COLUMNS = [
     "run_id", "date", "timestamp", "symbol", "trade_date", "mode", "bar_source", "direction", "parameter_set_id",
     "trend_window", "channel_window", "r2_threshold", "channel_high_percentile", "channel_low_percentile",
-    "continuous_break_count", "active_threshold", "open", "high", "low", "close", "volume", "wap", "bar_count",
+    "continuous_break_count", "curr_mix_ratio", "active_threshold", "open", "high", "low", "close", "volume", "wap", "bar_count",
     "bar_size", "what_to_show", "use_rth", "source", "trend_price", "trend_slope", "trend_r2", "trend_slope_rmse",
     "trend_slope_std", "trend_fit_ok", "trend_raw_trend", "trend_stack_length_after", "channel_pred_high", "channel_pred_low",
+    "channel_last_pred_high", "channel_last_pred_low", "channel_curr_pred_high", "channel_curr_pred_low", "channel_mix",
     "channel_effective_trend", "channel_last_trend_slope", "channel_last_trend_intercept", "channel_last_trend_bar_count",
     "channel_last_high_percentile", "channel_last_low_percentile", "channel_curr_trend_slope", "channel_curr_trend_intercept",
     "channel_curr_high_percentile", "channel_curr_low_percentile", "channel_stack_length_after", "decision",
@@ -78,7 +79,7 @@ class Database:
           mode TEXT NOT NULL, bar_source TEXT NOT NULL, direction TEXT NOT NULL, parameter_set_id TEXT NOT NULL,
           trend_window INTEGER NOT NULL, channel_window INTEGER NOT NULL, r2_threshold REAL NOT NULL,
           channel_high_percentile REAL NOT NULL, channel_low_percentile REAL NOT NULL,
-          continuous_break_count INTEGER NOT NULL,
+          continuous_break_count INTEGER NOT NULL, curr_mix_ratio REAL NOT NULL,
           active_threshold REAL,
           open REAL NOT NULL, high REAL NOT NULL, low REAL NOT NULL, close REAL NOT NULL,
           volume REAL NOT NULL, wap REAL NOT NULL, bar_count INTEGER NOT NULL,
@@ -87,7 +88,10 @@ class Database:
           trend_price REAL NOT NULL, trend_slope REAL, trend_r2 REAL, trend_slope_rmse REAL,
           trend_slope_std REAL, trend_fit_ok INTEGER, trend_raw_trend TEXT,
           trend_stack_length_after INTEGER NOT NULL,
-          channel_pred_high REAL, channel_pred_low REAL, channel_effective_trend TEXT,
+          channel_pred_high REAL, channel_pred_low REAL,
+          channel_last_pred_high REAL, channel_last_pred_low REAL,
+          channel_curr_pred_high REAL, channel_curr_pred_low REAL, channel_mix REAL,
+          channel_effective_trend TEXT,
           channel_last_trend_slope REAL, channel_last_trend_intercept REAL,
           channel_last_trend_bar_count INTEGER, channel_last_high_percentile REAL,
           channel_last_low_percentile REAL, channel_curr_trend_slope REAL,
@@ -107,8 +111,33 @@ class Database:
           started_at_epoch INTEGER NOT NULL, ended_at_epoch INTEGER NOT NULL, error_type TEXT, error_message TEXT,
           CHECK (status IN ('COMPLETED', 'FAILED', 'SKIPPED')));
         ''')
-        self.connection.execute("INSERT OR IGNORE INTO schema_meta VALUES ('schema_version', ?)", (SCHEMA_VERSION,))
+        self._ensure_processed_bar_columns()
+        self.connection.execute(
+            "INSERT INTO schema_meta VALUES ('schema_version', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (SCHEMA_VERSION,),
+        )
         self.connection.commit()
+
+    def _ensure_processed_bar_columns(self) -> None:
+        """Add Channel-mix fields to existing compatible processed-bar tables."""
+        columns = {
+            row[1]
+            for row in self.connection.execute("PRAGMA table_info(processed_1m_bar)")
+        }
+        additions = {
+            "curr_mix_ratio": "REAL",
+            "channel_last_pred_high": "REAL",
+            "channel_last_pred_low": "REAL",
+            "channel_curr_pred_high": "REAL",
+            "channel_curr_pred_low": "REAL",
+            "channel_mix": "REAL",
+        }
+        for name, declared_type in additions.items():
+            if name not in columns:
+                self.connection.execute(
+                    f"ALTER TABLE processed_1m_bar ADD COLUMN {name} {declared_type}"
+                )
 
 
 def _epoch(value: datetime) -> int:
@@ -362,11 +391,14 @@ def processed_bar_row(value: ProcessedBarRecord) -> dict[str, object]:
         value.symbol, value.trade_date.isoformat(), value.mode.value, value.bar_source.value, value.direction.value,
         value.parameter_set_id, parameter['trend_window'], parameter['channel_window'], parameter['r2_threshold'],
         parameter['channel_high_percentile'], parameter['channel_low_percentile'], parameter['continuous_break_count'],
+        parameter.get('curr_mix_ratio', 1.0),
         value.active_threshold, value.open, value.high, value.low, value.close, value.volume, value.wap, value.barCount,
         '1 min', 'TRADES', 1, 'ibapi', trend.price, trend.slope, trend.r2, trend.slope_rmse, trend.slope_std,
         None if trend.trend_fit_ok is None else int(trend.trend_fit_ok),
         trend.raw_trend.value if trend.raw_trend is not None else None, trend.trend_stack_length_after,
-        channel.pred_high, channel.pred_low, channel.effective_trend.value if channel.effective_trend is not None else None,
+        channel.pred_high, channel.pred_low, channel.last_pred_high, channel.last_pred_low,
+        channel.curr_pred_high, channel.curr_pred_low, channel.mix,
+        channel.effective_trend.value if channel.effective_trend is not None else None,
         channel.last_trend_slope, channel.last_trend_intercept, channel.last_trend_bar_count,
         channel.last_high_percentile, channel.last_low_percentile, channel.curr_trend_slope,
         channel.curr_trend_intercept, channel.curr_high_percentile, channel.curr_low_percentile,

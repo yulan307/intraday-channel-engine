@@ -23,9 +23,9 @@ Implemented scope:
   used for the current Bar decision. Its `decision` value is null when no
   signal triggers, and otherwise is `BUY` or `SELL`. There are no JSON payload
   columns and no persisted `_et` columns.
-- The SQLite schema is `backtest_csv_statistics_v1`. Initialization verifies its shape;
-  it creates missing tables only and never clears or rebuilds existing data for
-  schema or column differences.
+- The SQLite schema metadata is `channel_mix_v1`. Initialization creates missing
+  tables without clearing or rebuilding existing data; it forward-adds the
+  dedicated Channel-mix processed-bar columns when they are absent.
 
 - Phase 8 runs one manually started Windows Live Paper process per different
   symbol. Each uses required `temporary_directory/<run_id>.sqlite3`, a normal
@@ -190,3 +190,13 @@ Bars. Retry waits are 20 seconds, one minute, 15 minutes, then one hour until
 session close; failure to recover by close marks the Run FAILED. `signal_event`
 now stores nullable `share` and JSON `remained_shares`; any SQLite write failure
 is terminal.
+
+Channel prediction retains separate `last_pred_high` / `last_pred_low` and
+`curr_pred_high` / `curr_pred_low` audit values. Final `pred_high` and
+`pred_low` are blended only after both pairs exist. Parameter CSV rows require
+`curr_mix_ratio` in `[0, 1]`. With `delay = trend_window // 2`, current
+predictions are null through `n <= delay`, use `n - delay` through
+`n <= 2 * delay`, then use a fixed `delay` forward distance. A normalized k=4
+sigmoid spans 0 at `n = delay` to 1 at `n = 2 * delay`; multiplied by
+`curr_mix_ratio`, it weights current predictions. Without a last model, final
+predictions remain null to preserve first-segment warm-up behavior.

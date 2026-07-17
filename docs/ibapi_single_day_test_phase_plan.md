@@ -464,7 +464,7 @@ snapshot, `TrendResult`, `ChannelResult`, and `DecisionResult` is expanded
 into a dedicated column with a stable prefix where needed (`trend_`,
 `channel_`, and `decision_`).
 
-The current `processed_1m_bar` schema is `phase3_ibapi_v5`. It also preserves
+The current `processed_1m_bar` schema metadata is `channel_mix_v1`. It also preserves
 the raw request metadata `bar_size`, `what_to_show`, `use_rth`, and `source`.
 The previous `phase3_ibapi_v1`, `phase3_ibapi_v2`, `phase3_ibapi_v3`, and `phase3_ibapi_v4` schemas are incompatible
 and are cleared once during database
@@ -511,8 +511,8 @@ Each parameter set receives one generated `run_id` across all selected dates.
 `single_day_run` uses `(run_id, trade_date)` keys; the scan-level `run_summary`
 uses `run_id` as its key. Non-trading days are `SKIPPED`; failed dates continue;
 one final CSV aggregates all persisted processed rows for the `run_id`. The
-schema is rebuilt without retaining old data when its fields or keys do not
-match `backtest_csv_statistics_v1`.
+schema is retained when its fields or keys differ; initialization creates missing
+tables and forward-adds only the dedicated Channel-mix processed-bar columns.
 
 ## 6.1 目标
 
@@ -1399,3 +1399,12 @@ Delivered scope:
 Excluded scope remains account management, order/fill tracking, funds checks,
 positions/holdings checks, a multi-symbol launcher, a supervisor, and retained
 database retry tooling.
+
+## Current Channel prediction contract
+
+Parameter rows require `curr_mix_ratio` in `[0, 1]`. Processed-Bar audit keeps
+last/current raw prediction pairs and applied mix, while Decision still uses
+only final `pred_high` / `pred_low`. Current predictions use `n - delay` until
+`2 * delay` and fixed `delay` afterward. A normalized k=4 sigmoid transitions
+from last to current over that range, scaled by `curr_mix_ratio`; no last model
+keeps final predictions null.

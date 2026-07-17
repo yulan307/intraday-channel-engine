@@ -144,11 +144,11 @@ def test_nonconforming_schema_is_not_cleared(tmp_path) -> None:
     path = tmp_path / "legacy.sqlite3"
     sqlite3.connect(path).execute("CREATE TABLE raw_1m_bar (timestamp TEXT)").connection.commit()
     database = Database(path); database.initialize()
-    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "live_recovery_v1"
+    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "channel_mix_v1"
     assert [row[1] for row in database.connection.execute("PRAGMA table_info(raw_1m_bar)")] == ["timestamp"]
 
 
-def test_previous_schema_version_is_preserved_without_rebuild(tmp_path) -> None:
+def test_previous_schema_version_is_advanced_without_rebuild(tmp_path) -> None:
     path = tmp_path / "previous_phase3.sqlite3"
     database = Database(path)
     database.initialize()
@@ -159,13 +159,42 @@ def test_previous_schema_version_is_preserved_without_rebuild(tmp_path) -> None:
     database.connection.commit()
     database.initialize()
     assert database.connection.execute("SELECT COUNT(*) FROM raw_1m_bar").fetchone()[0] == 1
-    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "phase3_ibapi_v4"
+    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "channel_mix_v1"
     columns = {row[1] for row in database.connection.execute("PRAGMA table_info(processed_1m_bar)")}
-    assert {"date", "timestamp", "wap", "bar_count", "bar_size", "what_to_show", "use_rth", "source", "trend_slope", "channel_window", "channel_pred_high", "decision_triggered"} <= columns
+    assert {"date", "timestamp", "wap", "bar_count", "bar_size", "what_to_show", "use_rth", "source", "trend_slope", "channel_window", "channel_pred_high", "decision_triggered", "curr_mix_ratio", "channel_last_pred_high", "channel_last_pred_low", "channel_curr_pred_high", "channel_curr_pred_low", "channel_mix"} <= columns
     assert not {"slope_std_window", "dev_window", "residual_window"} & columns
     assert not any(column.lower().endswith("_et") or column.lower() == "et" for column in columns)
     assert "initial_threshold" not in columns
     assert not {"parameter_snapshot_json", "trend_json", "channel_json", "decision_json"} & columns
+
+
+def test_initialize_adds_channel_mix_columns_to_an_old_processed_table(tmp_path) -> None:
+    path = tmp_path / "legacy_processed.sqlite3"
+    database = Database(path)
+    database.initialize()
+    old_columns = [
+        row[1]
+        for row in database.connection.execute("PRAGMA table_info(processed_1m_bar)")
+        if row[1]
+        not in {
+            "curr_mix_ratio", "channel_last_pred_high", "channel_last_pred_low",
+            "channel_curr_pred_high", "channel_curr_pred_low", "channel_mix",
+        }
+    ]
+    database.connection.execute(
+        f"CREATE TABLE processed_legacy AS SELECT {', '.join(old_columns)} FROM processed_1m_bar WHERE 0"
+    )
+    database.connection.execute("DROP TABLE processed_1m_bar")
+    database.connection.execute("ALTER TABLE processed_legacy RENAME TO processed_1m_bar")
+    database.connection.commit()
+
+    database.initialize()
+
+    columns = {row[1] for row in database.connection.execute("PRAGMA table_info(processed_1m_bar)")}
+    assert {
+        "curr_mix_ratio", "channel_last_pred_high", "channel_last_pred_low",
+        "channel_curr_pred_high", "channel_curr_pred_low", "channel_mix",
+    } <= columns
 
 
 def test_processed_run_csv_uses_the_processed_table_fields(tmp_path) -> None:
@@ -177,10 +206,16 @@ def test_processed_run_csv_uses_the_processed_table_fields(tmp_path) -> None:
         "run-1", "AAPL", date(2025, 1, 15), timestamp, RunMode.BACKTEST, BarSource.HIST,
         Direction.BUY, "params", {"trend_window": 30, "channel_window": 5,
         "r2_threshold": 0.5, "channel_high_percentile": 95.0,
-        "channel_low_percentile": 5.0, "continuous_break_count": 3, "is_active": 1}, 0.0,
+        "channel_low_percentile": 5.0, "continuous_break_count": 3,
+        "curr_mix_ratio": 0.25, "is_active": 1}, 0.0,
         100.0, 101.0, 99.0, 100.5, 10.0, 100.25, 3,
         TrendResult(100.5, 0.1, 0.9, 0.01, 0.02, True, TrendLabel.UP, 30),
-        ChannelResult(None, None, TrendLabel.UP, None, None, None, None, None, 0.1, 100.0, 95.0, 5.0, 30),
+        ChannelResult(
+            None, None, TrendLabel.UP, None, None, None, None, None,
+            0.1, 100.0, 95.0, 5.0, 30,
+            last_pred_high=110.0, last_pred_low=90.0,
+            curr_pred_high=108.0, curr_pred_low=92.0, mix=0.25,
+        ),
         DecisionResult(DecisionLabel.BUY, 3, True),
     )
     records = [record, replace(
@@ -196,6 +231,10 @@ def test_processed_run_csv_uses_the_processed_table_fields(tmp_path) -> None:
     assert list(rows[0]) == columns
     assert rows[0]["run_id"] == "run-1"
     assert rows[0]["timestamp"] == "2025-01-15T10:00:00-05:00"
+    assert rows[0]["curr_mix_ratio"] == "0.25"
+    assert rows[0]["channel_last_pred_high"] == "110.0"
+    assert rows[0]["channel_curr_pred_high"] == "108.0"
+    assert rows[0]["channel_mix"] == "0.25"
     assert [row["decision"] for row in rows] == ["BUY", ""]
     assert database.connection.execute("SELECT COUNT(*) FROM processed_1m_bar WHERE run_id='run-1'").fetchone()[0] == 0
 

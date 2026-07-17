@@ -1,5 +1,7 @@
 # Revision History
 
+| 2026-07-17 | Channel prediction engine, parameter CSV, SQLite/CSV audit persistence, and Channel tests | Added required `curr_mix_ratio`, separate last/current prediction audit fields, normalized sigmoid blending, and forward-compatible processed-bar column migration. Current predictions use the fixed delayed distance after `2 * delay`; first-segment final predictions remain null. | Updated README, CONTEXT, current development/flow/phase documentation, and this revision history. |
+
 | 2026-07-17 | Phase 8 current-state documentation and `docs/archive/phase8_draft.md` | Consolidated the implemented Phase 8 design, flow, and plan into maintained current-state documents. Moved the historical decision draft to the ignored archive and removed it from Git tracking. | Updated development design, flow design, phase plan, and this revision history. |
 
 | 2026-07-17 | `.gitignore`, `configs/ib_config_sample.yaml`, and Git tracking for `configs/ib.yaml` | Restricted tracked configuration artifacts to `*_sample.yaml` and `*_sample.csv`; added the IB profile sample and made the actual IB profile local-only. | Updated README and CONTEXT. |
