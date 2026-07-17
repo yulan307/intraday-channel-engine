@@ -45,6 +45,9 @@ class ChannelState:
 @dataclass
 class DecisionState:
     break_count: int = 0
+    opposite_seen: bool = True
+    break_trend: TrendLabel | None = None
+    trend_changed: bool = True
 
 
 @dataclass(frozen=True)

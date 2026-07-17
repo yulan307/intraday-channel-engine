@@ -62,7 +62,7 @@ def _make_params(**overrides):
     base = dict(
         parameter_set_id="p1",
         trend_window=30,
-        channel_window=10,
+        channel_window=30,
         r2_threshold=0.5,
         channel_high_percentile=95.0,
         channel_low_percentile=95.0,
@@ -134,7 +134,7 @@ def test_error_hierarchy():
 # ---------------------------------------------------------------------------
 def test_parameter_set_valid_boundaries():
     validate_parameter_set(_make_params(trend_window=3))
-    validate_parameter_set(_make_params(channel_window=3))
+    validate_parameter_set(_make_params(trend_window=3, channel_window=3))
     validate_parameter_set(_make_params(r2_threshold=0.0))
     validate_parameter_set(_make_params(r2_threshold=1.0))
     validate_parameter_set(_make_params(channel_high_percentile=0.0))
@@ -154,6 +154,11 @@ def test_parameter_set_invalid_trend_window():
 def test_parameter_set_invalid_channel_window():
     with pytest.raises(InputValidationError, match="channel_window"):
         validate_parameter_set(_make_params(channel_window=2))
+
+
+def test_parameter_set_rejects_channel_window_below_trend_window():
+    with pytest.raises(InputValidationError, match="channel_window must be >= trend_window"):
+        validate_parameter_set(_make_params(channel_window=29))
 
 
 def test_parameter_set_invalid_r2_below():
@@ -659,6 +664,9 @@ def test_mutable_states():
     cs.bars.append(None)
     ds = DecisionState()
     ds.break_count = 1
+    assert ds.opposite_seen is True
+    assert ds.break_trend is None
+    assert ds.trend_changed is True
     rs = RuntimeState.empty(params)
     rs.processed_bar_count = 1
 

@@ -27,16 +27,43 @@ def calculate_current_prediction(
     params: ParameterSet,
 ) -> tuple[float | None, float | None]:
     """Predict the current bar from the delayed current-model prefix."""
-    delay = params.trend_window // 2
-    if model is None or channel_stack_length <= delay:
+    forward_count = current_prediction_forward_count(channel_stack_length, params)
+    if model is None or forward_count is None:
         return None, None
-    forward_count = (
-        channel_stack_length - delay
-        if channel_stack_length <= 2 * delay
-        else delay
-    )
     center = model.slope * forward_count + model.intercept
     return center + model.high_percentile, center - model.low_percentile
+
+
+def current_prediction_forward_count(
+    channel_stack_length: int, params: ParameterSet
+) -> int | None:
+    """Return the delayed-prefix coordinate for the current bar."""
+    delay = params.trend_window // 2
+    if channel_stack_length < 3:
+        return None
+    if channel_stack_length <= delay:
+        return 0
+    if channel_stack_length <= 2 * delay:
+        return channel_stack_length - delay
+    return delay
+
+
+def calculate_frozen_last_prediction(
+    model: CurrentChannelModel | None,
+    channel_stack_length: int,
+    params: ParameterSet,
+) -> tuple[float | None, float | None, int | None]:
+    """Predict the switch bar from the current model being frozen as last."""
+    current_count = current_prediction_forward_count(channel_stack_length, params)
+    if model is None or current_count is None:
+        return None, None, None
+    count = current_count + 1
+    center = model.slope * count + model.intercept
+    return (
+        center + model.high_percentile,
+        center - model.low_percentile,
+        count,
+    )
 
 
 def normalized_time_mix(channel_stack_length: int, params: ParameterSet) -> float:
@@ -167,12 +194,19 @@ class ChannelEngine:
             next_state.bars.append(current_bar)
         else:
             old_model = self._current_model_from_state(state)
-            if old_model is not None:
+            (
+                frozen_last_pred_high,
+                frozen_last_pred_low,
+                frozen_last_count,
+            ) = calculate_frozen_last_prediction(old_model, len(state.bars), params)
+            if frozen_last_count is not None:
                 next_state.last_trend_slope = old_model.slope
                 next_state.last_trend_intercept = old_model.intercept
                 next_state.last_high_percentile = old_model.high_percentile
                 next_state.last_low_percentile = old_model.low_percentile
-                next_state.last_trend_bar_count = 1
+                next_state.last_trend_bar_count = frozen_last_count
+                last_pred_high = frozen_last_pred_high
+                last_pred_low = frozen_last_pred_low
             next_state.effective_trend = trend.raw_trend
             next_state.bars = [current_bar]
 

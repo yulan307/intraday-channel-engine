@@ -15,6 +15,7 @@ from single_day_test.engine.channel_engine import (
     ChannelEngine,
     CurrentChannelModel,
     blend_predictions,
+    calculate_frozen_last_prediction,
     calculate_current_prediction,
     calculate_current_model,
     normalized_time_mix,
@@ -195,10 +196,32 @@ def test_channel_current_prediction_uses_delayed_forward_distance() -> None:
     )
     channel_params = params(trend_window=10, channel_window=30)
 
-    assert calculate_current_prediction(model, 5, channel_params) == (None, None)
+    assert calculate_current_prediction(model, 2, channel_params) == (None, None)
+    assert calculate_current_prediction(model, 3, channel_params) == pytest.approx((15.0, 7.0))
+    assert calculate_current_prediction(model, 5, channel_params) == pytest.approx((15.0, 7.0))
     assert calculate_current_prediction(model, 6, channel_params) == pytest.approx((17.0, 9.0))
     assert calculate_current_prediction(model, 10, channel_params) == pytest.approx((25.0, 17.0))
     assert calculate_current_prediction(model, 11, channel_params) == pytest.approx((25.0, 17.0))
+
+
+def test_channel_frozen_last_prediction_advances_from_current_coordinate() -> None:
+    model = CurrentChannelModel(
+        slope=2.0,
+        intercept=10.0,
+        high_percentile=5.0,
+        low_percentile=3.0,
+    )
+    channel_params = params(trend_window=10, channel_window=30)
+
+    assert calculate_frozen_last_prediction(model, 8, channel_params) == pytest.approx(
+        (23.0, 15.0, 4)
+    )
+    assert calculate_frozen_last_prediction(model, 10, channel_params) == pytest.approx(
+        (27.0, 19.0, 6)
+    )
+    assert calculate_frozen_last_prediction(model, 11, channel_params) == pytest.approx(
+        (27.0, 19.0, 6)
+    )
 
 
 def test_channel_normalized_time_mix_has_exact_delay_endpoints() -> None:
@@ -216,7 +239,7 @@ def test_channel_blend_preserves_last_warmup_and_ratio_endpoints() -> None:
     assert blend_predictions(10.0, 6.0, 14.0, 2.0, 1.0) == (14.0, 2.0, 1.0)
 
 
-def test_channel_switch_keeps_current_prediction_and_promotes_old_model() -> None:
+def test_channel_switch_emits_frozen_last_prediction_and_promotes_old_model() -> None:
     old_bars = [
         ChannelBar(datetime(2025, 1, 15, 9, 30, tzinfo=ET), 1.0, 2.0, 0.0),
         ChannelBar(datetime(2025, 1, 15, 9, 31, tzinfo=ET), 2.0, 3.0, 1.0),
@@ -240,15 +263,55 @@ def test_channel_switch_keeps_current_prediction_and_promotes_old_model() -> Non
         completed_bar(3, 4.0), trend(4.0, TrendLabel.DOWN), state, params()
     )
 
-    assert result.pred_high == pytest.approx(135.0)
-    assert result.pred_low == pytest.approx(126.0)
+    assert result.pred_high == pytest.approx(6.0)
+    assert result.pred_low == pytest.approx(4.0)
+    assert result.last_pred_high == pytest.approx(6.0)
+    assert result.last_pred_low == pytest.approx(4.0)
     assert result.effective_trend is TrendLabel.DOWN
     assert result.last_trend_slope == pytest.approx(1.0)
     assert result.last_trend_intercept == pytest.approx(3.0)
-    assert result.last_trend_bar_count == 1
+    assert result.last_trend_bar_count == 2
     assert result.channel_stack_length_after == 1
     assert [item.price for item in state.bars] == [1.0, 2.0, 3.0]
     assert [item.price for item in next_state.bars] == [4.0]
+
+
+def test_channel_last_prediction_continues_after_stable_current_model_freezes() -> None:
+    channel_params = params(trend_window=10, channel_window=30)
+    old_bars = [
+        ChannelBar(
+            datetime(2025, 1, 15, 9, 30, tzinfo=ET) + timedelta(minutes=index),
+            float(index),
+            float(index + 1),
+            float(index - 1),
+        )
+        for index in range(11)
+    ]
+    state = ChannelState(
+        bars=old_bars,
+        effective_trend=TrendLabel.UP,
+        curr_trend_slope=2.0,
+        curr_trend_intercept=10.0,
+        curr_high_percentile=5.0,
+        curr_low_percentile=3.0,
+    )
+    engine = ChannelEngine()
+
+    switch_result, next_state = engine.update(
+        completed_bar(11, 11.0), trend(11.0, TrendLabel.DOWN), state, channel_params
+    )
+    next_result, _ = engine.update(
+        completed_bar(12, 12.0), trend(12.0, TrendLabel.DOWN), next_state, channel_params
+    )
+
+    assert switch_result.last_pred_high == pytest.approx(27.0)
+    assert switch_result.last_pred_low == pytest.approx(19.0)
+    assert switch_result.pred_high == pytest.approx(27.0)
+    assert switch_result.pred_low == pytest.approx(19.0)
+    assert next_result.last_pred_high == pytest.approx(29.0)
+    assert next_result.last_pred_low == pytest.approx(21.0)
+    assert next_result.pred_high == pytest.approx(29.0)
+    assert next_result.pred_low == pytest.approx(21.0)
 
 
 def test_channel_null_raw_trend_continues_existing_segment() -> None:
@@ -284,7 +347,7 @@ def test_channel_retains_only_the_latest_channel_window_bars() -> None:
 def test_decision_engine_records_trigger_count_and_resets_after_persist() -> None:
     engine = DecisionEngine()
     first = engine.evaluate(
-        Direction.BUY, 95.0, 100.0, 90.0, None, 1.0, 0.5, DecisionState(), params()
+        Direction.BUY, 95.0, 100.0, 90.0, None, 1.0, 0.5, DecisionState(), params(), TrendLabel.DOWN
     )
     second = engine.evaluate(
         Direction.BUY,
@@ -296,6 +359,7 @@ def test_decision_engine_records_trigger_count_and_resets_after_persist() -> Non
         0.5,
         first.next_state_after_persist,
         params(),
+        TrendLabel.UP,
     )
 
     assert first.result.decision is DecisionLabel.NO_BUY
@@ -304,15 +368,119 @@ def test_decision_engine_records_trigger_count_and_resets_after_persist() -> Non
     assert second.result.recorded_break_count == 2
     assert second.result.triggered is True
     assert second.next_state_after_persist.break_count == 0
+    assert second.next_state_after_persist.opposite_seen is False
+    assert second.next_state_after_persist.break_trend is TrendLabel.UP
+    assert second.next_state_after_persist.trend_changed is False
+
+
+@pytest.mark.parametrize(
+    (
+        "direction",
+        "required_trend",
+        "other_trend",
+        "price",
+        "pred_high",
+        "pred_low",
+        "slope",
+    ),
+    [
+        (Direction.BUY, TrendLabel.DOWN, TrendLabel.UP, 95.0, 90.0, None, 1.0),
+        (Direction.SELL, TrendLabel.UP, TrendLabel.DOWN, 105.0, None, 110.0, -1.0),
+    ],
+)
+def test_decision_rearms_only_after_channel_trend_change_and_opposite_observation(
+    direction: Direction,
+    required_trend: TrendLabel,
+    other_trend: TrendLabel,
+    price: float,
+    pred_high: float | None,
+    pred_low: float | None,
+    slope: float,
+) -> None:
+    engine = DecisionEngine()
+    signal_params = params(continuous_break_count=1)
+    initial_signal = engine.evaluate(
+        direction,
+        price,
+        100.0,
+        pred_high,
+        pred_low,
+        slope,
+        0.5,
+        DecisionState(),
+        signal_params,
+        TrendLabel.SIDEWAY,
+    )
+    unchanged = engine.evaluate(
+        direction,
+        price,
+        100.0,
+        pred_high,
+        pred_low,
+        slope,
+        0.5,
+        initial_signal.next_state_after_persist,
+        signal_params,
+        TrendLabel.SIDEWAY,
+    )
+    none_trend = engine.evaluate(
+        direction,
+        price,
+        100.0,
+        pred_high,
+        pred_low,
+        slope,
+        0.5,
+        unchanged.next_state_after_persist,
+        signal_params,
+        None,
+    )
+    changed_without_opposite = engine.evaluate(
+        direction,
+        price,
+        100.0,
+        pred_high,
+        pred_low,
+        slope,
+        0.5,
+        none_trend.next_state_after_persist,
+        signal_params,
+        other_trend,
+    )
+    rearmed_signal = engine.evaluate(
+        direction,
+        price,
+        100.0,
+        pred_high,
+        pred_low,
+        slope,
+        0.5,
+        changed_without_opposite.next_state_after_persist,
+        signal_params,
+        required_trend,
+    )
+
+    assert initial_signal.result.triggered is True
+    assert initial_signal.next_state_after_persist.break_trend is TrendLabel.SIDEWAY
+    assert unchanged.result.triggered is False
+    assert unchanged.next_state_after_persist.trend_changed is False
+    assert none_trend.next_state_after_persist.trend_changed is False
+    assert changed_without_opposite.result.triggered is False
+    assert changed_without_opposite.next_state_after_persist.trend_changed is True
+    assert changed_without_opposite.next_state_after_persist.opposite_seen is False
+    assert rearmed_signal.result.triggered is True
+    assert rearmed_signal.next_state_after_persist.break_trend is required_trend
+    assert rearmed_signal.next_state_after_persist.opposite_seen is False
+    assert rearmed_signal.next_state_after_persist.trend_changed is False
 
 
 def test_decision_engine_buy_and_sell_reset_on_boundary_conditions() -> None:
     engine = DecisionEngine()
     buy = engine.evaluate(
-        Direction.BUY, 90.0, 100.0, 90.0, None, 1.0, 0.5, DecisionState(4), params()
+        Direction.BUY, 90.0, 100.0, 90.0, None, 1.0, 0.5, DecisionState(4, True), params()
     )
     sell = engine.evaluate(
-        Direction.SELL, 110.0, 100.0, None, 110.0, -1.0, 0.5, DecisionState(4), params()
+        Direction.SELL, 110.0, 100.0, None, 110.0, -1.0, 0.5, DecisionState(4, True), params()
     )
 
     assert buy.result.decision is DecisionLabel.NO_BUY
@@ -343,7 +511,7 @@ def test_decision_engine_allows_directional_slope_thresholds(
         110.0 if direction is Direction.SELL else None,
         trend_slope,
         trend_slope_std,
-        DecisionState(1),
+        DecisionState(1, True),
         params(),
     )
 
@@ -373,7 +541,7 @@ def test_decision_engine_rejects_ineligible_or_missing_slope_values(
         110.0 if direction is Direction.SELL else None,
         trend_slope,
         trend_slope_std,
-        DecisionState(1),
+        DecisionState(1, True),
         params(),
     )
 
