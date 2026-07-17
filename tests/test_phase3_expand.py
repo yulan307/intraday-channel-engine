@@ -351,7 +351,8 @@ def test_schema_shape_mismatch_preserves_existing_columns_and_rows(tmp_path) -> 
     columns = [row[1] for row in database.connection.execute("PRAGMA table_info(processed_1m_bar)")]
     assert "unexpected" in columns
     assert "initial_threshold" not in columns
-    assert columns[15] == "active_threshold"
+    assert columns[15] == "curr_mix_ratio"
+    assert columns[16] == "active_threshold"
 
 
 def test_run_persists_threshold_update_rate(tmp_path) -> None:

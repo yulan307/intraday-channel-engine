@@ -179,10 +179,10 @@ Trend and Channel state for the next Bar; the signal Bar itself retains the
 pre-reset calculation. Fixed Threshold never changes or resets either state.
 
 The tracked parameter template is `configs/parameter_set_sample.csv`; the runtime
-`configs/parameter_set.csv` is local and ignored. The database schema is
-`backtest_csv_statistics_v1`. During initialization, any
-nonconforming Phase 3 table shape causes the complete Phase 3 database to be
-cleared and recreated; no old data is migrated or retained.
+`configs/parameter_set.csv` is local and ignored. SQLite schema metadata is
+`channel_mix_v1`. Initialization creates missing tables without clearing or
+rebuilding existing data, and forward-adds the dedicated Channel-mix
+processed-bar columns when absent.
 
 Install the official IBKR TWS API Python client before running this project.
 The PyPI `ibapi==9.81.1.post1` package is too old for `SCHEDULE` and must not
@@ -190,3 +190,16 @@ be used. Copy `configs/ib_config_sample.yaml` to the local `configs/ib.yaml`,
 then configure paper/live TWS profiles and separate
 market/order client IDs. Fill tracking, reconciliation, and checkpointing are
 outside this scope.
+
+## Channel blended prediction
+
+Each parameter-set CSV row requires `curr_mix_ratio` in `[0, 1]`. Channel
+records prior-segment `last_pred_high` / `last_pred_low`, delayed-current
+`curr_pred_high` / `curr_pred_low`, and the applied `mix` for audit. Decision
+continues to consume only final `pred_high` / `pred_low`. Current predictions
+are null through `delay = trend_window // 2`, use `n - delay` through
+`n = 2 * delay`, and use fixed `delay` afterward. When both pairs exist, final
+prediction is `last * (1 - mix) + curr * mix`; `mix` is `curr_mix_ratio` times
+a normalized k=4 sigmoid spanning exactly from zero at `n = delay` to one at
+`n = 2 * delay`. The first segment remains without final predictions until a
+valid last model exists.

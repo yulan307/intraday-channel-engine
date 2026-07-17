@@ -316,8 +316,9 @@ inclusive calendar dates. Each parameter set receives one generated `run_id`;
 daily `single_day_run` records use `(run_id, trade_date)`, while scan-level
 `run_summary` records use `run_id`. `SKIPPED` non-trading days and `FAILED`
 days do not stop later dates, and one multi-day CSV is exported after all dates.
-The current SQLite schema is `backtest_csv_statistics_v1` and incompatible
-tables are rebuilt without migration. Auto Threshold resets each date,
+The current SQLite schema metadata is `channel_mix_v1`; initialization creates
+missing tables without rebuilding existing data and forward-adds dedicated
+Channel-mix processed-bar columns when absent. Auto Threshold resets each date,
 initializes from the first completed Bar raw `open`, and applies
 signal-driven updates to the following Bar. Numeric thresholds with an
 explicit numeric update rate, including zero, select Auto; null or omitted
@@ -1770,3 +1771,14 @@ The operator launches one independent process per different symbol. Phase 8
 does not add a supervisor, same-symbol coordination, account/position/funds
 checks, order acknowledgement/fill tracking, or an application concurrency cap.
 TWS/IBKR limits remain authoritative.
+
+## Channel blended prediction
+
+Channel first captures old-model predictions as `last_pred_*`, then updates the
+delayed-prefix current model and computes `curr_pred_*`. The current coordinate
+is `n - delay` through `n <= 2 * delay` and fixed `delay` afterward because the
+selected prefix endpoint is then always `delay` Bars behind the current Bar.
+Final `pred_*` is null before a valid last model, remains last-only while curr
+is unavailable, then becomes `last * (1 - mix) + curr * mix`. `mix` is
+`curr_mix_ratio` times a normalized k=4 sigmoid spanning 0 at `n = delay` to
+1 at `n = 2 * delay`.
