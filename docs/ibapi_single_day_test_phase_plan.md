@@ -503,8 +503,8 @@ rate. Auto Threshold resets each
 date, initializes from the first completed Bar raw `open`, and updates after
 triggered BUY or SELL for the following Bar using the configured 0-100 percent
 rate: BUY subtracts it and SELL adds it to the signal price. That signal-driven update
-resets Trend and Channel state for the following Bar, but not for the signal
-Bar itself. The persisted `processed_1m_bar.decision` is null without a
+updates only the following active threshold; Trend and Channel state remain
+continuous from the signal Bar. The persisted `processed_1m_bar.decision` is null without a
 triggered signal and is `BUY` or `SELL` when one triggers.
 
 Each parameter set receives one generated `run_id` across all selected dates.
@@ -1402,9 +1402,24 @@ database retry tooling.
 
 ## Current Channel prediction contract
 
-Parameter rows require `curr_mix_ratio` in `[0, 1]`. Processed-Bar audit keeps
+Parameter rows require `curr_mix_ratio` in `[0, 1]` and `channel_window >=
+trend_window`. Processed-Bar audit keeps
 last/current raw prediction pairs and applied mix, while Decision still uses
-only final `pred_high` / `pred_low`. Current predictions use `n - delay` until
-`2 * delay` and fixed `delay` afterward. A normalized k=4 sigmoid transitions
+only final `pred_high` / `pred_low`. Current predictions are available from
+three Bars, use the fitted intercept through `delay`, use `n - delay` until
+`2 * delay`, and fixed `delay` afterward. A normalized k=4 sigmoid transitions
 from last to current over that range, scaled by `curr_mix_ratio`; no last model
-keeps final predictions null.
+keeps final predictions null. On a trend switch, the frozen current model emits
+the switch-Bar last prediction at its former coordinate plus one (`delay + 1`
+in the stable range), and later last predictions advance without resetting the
+coordinate. Auto signals do not reset or freeze Channel state.
+
+## Current Decision opposite-trend gate
+
+Decision keeps runtime-only `break_trend`, `trend_changed`, and `opposite_seen`.
+The initial daily state is open. After each real signal it records the current
+break trend and closes both rearm flags. A non-null effective trend change first
+reopens `trend_changed`; then BUY requires a DOWN observation or SELL an UP
+observation to reopen `opposite_seen`. Both are required before the existing
+break conditions can produce the next signal. Trend and Channel state continue
+unchanged.

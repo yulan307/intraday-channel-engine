@@ -1245,12 +1245,18 @@ effective_trend / last_* / curr_* / channel_stack_length_after
 
 ```text
 break_count
+opposite_seen
+break_trend
+trend_changed
 ```
 
 初始：
 
 ```text
 break_count = 0
+opposite_seen = true
+break_trend = null
+trend_changed = true
 ```
 
 Parameter Set：
@@ -1266,6 +1272,14 @@ price
 active_threshold
 ```
 
+Before price and slope checks, Decision advances its rearm state. The day begins
+open. After an actual signal, it stores the signal Bar's `effective_trend` as
+`break_trend` and sets both `trend_changed` and `opposite_seen` false. A later
+non-null effective trend different from `break_trend` latches `trend_changed`.
+Only then does BUY latch `opposite_seen` on DOWN or SELL on UP. Both flags must
+be true before break counting resumes; the Bar that completes the sequence may
+also be evaluated for a signal.
+
 其中：
 
 ```text
@@ -1277,6 +1291,14 @@ active_threshold = initial_threshold
 ### 15.2 BUY
 
 ```text
+opposite_seen = false
+    -> NO_BUY
+    -> break_count = 0
+
+trend_changed = false
+    -> NO_BUY
+    -> break_count = 0
+
 pred_high = null
     -> NO_BUY
     -> break_count = 0
@@ -1318,6 +1340,14 @@ break_count < continuous_break_count
 SELL 与 BUY 相反，使用 `pred_low`：
 
 ```text
+opposite_seen = false
+    -> NO_SELL
+    -> break_count = 0
+
+trend_changed = false
+    -> NO_SELL
+    -> break_count = 0
+
 pred_low = null
     -> NO_SELL
     -> break_count = 0
@@ -1364,6 +1394,9 @@ BUY 或 SELL 触发时：
 
 ```text
 break_count = 0
+opposite_seen = false
+break_trend = current effective_trend
+trend_changed = false
 ```
 
 不另外增加 `trigger_break_count` 字段。
@@ -1775,10 +1808,16 @@ TWS/IBKR limits remain authoritative.
 ## Channel blended prediction
 
 Channel first captures old-model predictions as `last_pred_*`, then updates the
-delayed-prefix current model and computes `curr_pred_*`. The current coordinate
-is `n - delay` through `n <= 2 * delay` and fixed `delay` afterward because the
+delayed-prefix current model and computes `curr_pred_*`. Current predictions are
+available from `n = 3`: they use the fitted intercept through `n <= delay`,
+then use coordinate `n - delay` through `n <= 2 * delay` and fixed `delay`
+afterward because the
 selected prefix endpoint is then always `delay` Bars behind the current Bar.
 Final `pred_*` is null before a valid last model, remains last-only while curr
 is unavailable, then becomes `last * (1 - mix) + curr * mix`. `mix` is
 `curr_mix_ratio` times a normalized k=4 sigmoid spanning 0 at `n = delay` to
-1 at `n = 2 * delay`.
+1 at `n = 2 * delay`. A switch freezes the old current model and emits its
+last prediction for that same Bar at the old current coordinate plus one. Once
+the delayed prefix is stable, this starts at `delay + 1`; later last predictions
+continue at `delay + 2`, `delay + 3`, and so on. An Auto signal does not reset
+or freeze Channel state; it only updates the next active threshold.

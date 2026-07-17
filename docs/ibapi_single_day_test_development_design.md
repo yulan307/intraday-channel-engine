@@ -722,13 +722,22 @@ triggered BUY or SELL for the following Bar. A numeric threshold plus an
 explicit numeric `threshold_update_rate` from 0 through 100 selects Auto and
 uses that threshold as the initial value; a null or omitted rate keeps a
 numeric threshold Fixed. BUY applies `1 - rate / 100` and SELL applies
-`1 + rate / 100` to the signal price. A signal-driven update resets Trend and
-Channel state for the following Bar, while the signal Bar retains its existing
-calculation. `processed_1m_bar.decision` is null without a triggered signal
+`1 + rate / 100` to the signal price. A signal-driven update changes only
+the following active threshold; Trend and Channel state retain the signal Bar
+update. The signal Bar retains its existing calculation. `processed_1m_bar.decision` is null without a triggered signal
 and is `BUY` or `SELL` when one triggers. A null threshold remains Auto and
 initializes from the first completed Bar raw `open` in both Backtest and Live
 Paper. Startup confirmation reports the resolved `auto_threshold_enabled`
 value before runtime side effects.
+
+Decision keeps runtime-only `break_trend`, `trend_changed`, and `opposite_seen`
+fields. The day starts open (`trend_changed=True`, `opposite_seen=True`). A real
+signal stores its current `effective_trend` as `break_trend` and clears both
+rearm flags. A later non-null effective trend different from `break_trend`
+latches `trend_changed`; only then can BUY observe DOWN or SELL observe UP to
+latch `opposite_seen`. Both flags are required before normal break counting
+resumes. The Bar that completes the rearm sequence may also trigger. Trend and
+Channel state do not reset.
 
 ## 10. BarFeed 接口
 
@@ -2697,12 +2706,21 @@ terminal path retains it without merging.
 
 ## Channel blended prediction
 
-`curr_mix_ratio` is a required `ParameterSet` CSV field in `[0, 1]`. Channel
+`curr_mix_ratio` is a required `ParameterSet` CSV field in `[0, 1]`, and
+`channel_window` must be at least `trend_window`. Channel
 returns raw `last_pred_high` / `last_pred_low`, raw `curr_pred_high` /
 `curr_pred_low`, and applied `mix` alongside final `pred_high` / `pred_low`.
 The latter remains the only Decision input. With `delay = trend_window // 2`,
-current predictions are null for `n <= delay`, use forward coordinate
-`n - delay` through `n <= 2 * delay`, and use `delay` afterward. When both
+current predictions are null only for `n < 3`, use the fitted intercept for
+`3 <= n <= delay`, use forward coordinate `n - delay` through `n <= 2 * delay`,
+and use `delay` afterward. When both
 pairs exist, `pred = last * (1 - mix) + curr * mix`; `mix` is
 `curr_mix_ratio` times a k=4 sigmoid normalized to exactly 0 at `n = delay`
-and 1 at `n = 2 * delay`. No last model leaves final predictions null.
+and 1 at `n = 2 * delay`. No last model leaves final predictions null. When a
+trend switch freezes the previous current model, Channel emits its `last_pred_*`
+for the switch Bar using the former current coordinate plus one. In the stable
+delayed-prefix range the frozen coordinate is `delay + 1`; the persisted last
+coordinate then advances by one for every later Bar, preventing a reset to one
+and the resulting prediction jump. After a triggered Auto Threshold signal,
+Channel state remains unchanged; the signal only updates the next active
+threshold.

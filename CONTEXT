@@ -62,12 +62,17 @@ Implemented scope:
   omitted rate keeps Fixed mode. A null threshold remains Auto and initializes
   from the first Bar open. BUY applies `1 - rate/100` and SELL applies
   `1 + rate/100` to the signal price. A signal-driven
-  Auto Threshold update resets Trend and Channel state for that next Bar; the
-  signal Bar retains its pre-reset calculations.
+  Auto Threshold update changes only the next active threshold; Trend and
+  Channel state continue from the signal Bar calculation.
 - DecisionEngine requires the existing price and prediction-channel condition
   plus `trend_slope >= trend_slope_std` for BUY or
   `trend_slope <= -trend_slope_std` for SELL. Missing slope values produce no
-  signal; post-signal processing is unchanged.
+  signal. Decision starts each day open, then records `break_trend` on every
+  actual signal and blocks another signal until a non-null `effective_trend`
+  change is observed. After that change, BUY requires a DOWN observation and
+  SELL requires an UP observation to set `opposite_seen`; both gates must pass
+  before break counting resumes. A real signal records its current break trend
+  and resets the rearm state, while Trend and Channel state remain unchanged.
 - `single_day_run` records `threshold_update_rate`, the actual first threshold,
   processed-Bar count, signal count, and direction-aware daily
   best-price/reward/efficiency metrics. Reward is the symmetric price proximity
@@ -194,9 +199,15 @@ is terminal.
 Channel prediction retains separate `last_pred_high` / `last_pred_low` and
 `curr_pred_high` / `curr_pred_low` audit values. Final `pred_high` and
 `pred_low` are blended only after both pairs exist. Parameter CSV rows require
-`curr_mix_ratio` in `[0, 1]`. With `delay = trend_window // 2`, current
-predictions are null through `n <= delay`, use `n - delay` through
+`curr_mix_ratio` in `[0, 1]` and `channel_window >= trend_window`. With
+`delay = trend_window // 2`, current predictions are null only for `n < 3`,
+use the current fitted intercept through `3 <= n <= delay`, use `n - delay` through
 `n <= 2 * delay`, then use a fixed `delay` forward distance. A normalized k=4
 sigmoid spans 0 at `n = delay` to 1 at `n = 2 * delay`; multiplied by
 `curr_mix_ratio`, it weights current predictions. Without a last model, final
-predictions remain null to preserve first-segment warm-up behavior.
+predictions remain null to preserve first-segment warm-up behavior. When a
+current model is frozen by a trend switch, it emits the switch-Bar last
+prediction at its prior current coordinate plus one; this is `delay + 1` in the
+stable delayed-prefix range, and later last predictions advance one coordinate
+per Bar without a reset. Auto Threshold signals do not reset, freeze, or clear
+Channel state; they only update the next active threshold.

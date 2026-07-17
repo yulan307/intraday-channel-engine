@@ -169,14 +169,19 @@ BUY requires both the existing price/`pred_high` breakout condition and
 `trend_slope >= trend_slope_std`. SELL requires the existing price/`pred_low`
 breakout condition and `trend_slope <= -trend_slope_std`. Missing slope values
 produce no signal. Signal post-processing is unchanged.
+Decision starts each day open. After a signal it records the current Channel
+`break_trend`, blocks repeat signals until a non-null effective-trend change,
+then requires a DOWN observation for BUY or an UP observation for SELL before
+break counting may resume. This runtime-only rearm state resets on every actual
+signal; Trend and Channel state remain continuous.
 `threshold_update_rate` is a 0-100 percentage. With a numeric threshold, a
 numeric rate (including `0`) enables Auto and uses that threshold as the
 initial value; null or omission keeps Fixed mode. A null threshold remains
 Auto and initializes from the first Bar open. Auto BUY updates to
 `signal_price × (1 - rate/100)` and SELL updates to
-`signal_price × (1 + rate/100)`. That signal also resets the
-Trend and Channel state for the next Bar; the signal Bar itself retains the
-pre-reset calculation. Fixed Threshold never changes or resets either state.
+`signal_price × (1 + rate/100)`. That signal updates the
+next active threshold while Trend and Channel state continue; the signal Bar
+itself retains its calculation. Fixed Threshold never changes either state.
 
 The tracked parameter template is `configs/parameter_set_sample.csv`; the runtime
 `configs/parameter_set.csv` is local and ignored. SQLite schema metadata is
@@ -193,13 +198,20 @@ outside this scope.
 
 ## Channel blended prediction
 
-Each parameter-set CSV row requires `curr_mix_ratio` in `[0, 1]`. Channel
+Each parameter-set CSV row requires `curr_mix_ratio` in `[0, 1]` and
+`channel_window >= trend_window`. Channel
 records prior-segment `last_pred_high` / `last_pred_low`, delayed-current
 `curr_pred_high` / `curr_pred_low`, and the applied `mix` for audit. Decision
 continues to consume only final `pred_high` / `pred_low`. Current predictions
-are null through `delay = trend_window // 2`, use `n - delay` through
+are null only below three Bars, use the fitted intercept from three Bars through
+`delay = trend_window // 2`, use `n - delay` through
 `n = 2 * delay`, and use fixed `delay` afterward. When both pairs exist, final
 prediction is `last * (1 - mix) + curr * mix`; `mix` is `curr_mix_ratio` times
 a normalized k=4 sigmoid spanning exactly from zero at `n = delay` to one at
 `n = 2 * delay`. The first segment remains without final predictions until a
-valid last model exists.
+valid last model exists. On a trend switch, the old current model is frozen and
+immediately supplies the switch-Bar last prediction at its previous current
+coordinate plus one (`delay + 1` after the delayed prefix is stable); later
+last predictions advance from that coordinate one Bar at a time. An Auto signal
+does not reset or freeze Channel state; it only updates the next active
+threshold.

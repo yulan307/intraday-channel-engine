@@ -67,6 +67,11 @@ def validate_parameter_set(params: ParameterSet) -> None:
         raise InputValidationError(
             f"channel_window must be >= 3, got {params.channel_window}"
         )
+    if params.channel_window < params.trend_window:
+        raise InputValidationError(
+            "channel_window must be >= trend_window, got "
+            f"channel_window={params.channel_window}, trend_window={params.trend_window}"
+        )
     if not (0.0 <= params.r2_threshold <= 1.0):
         raise InputValidationError(
             f"r2_threshold must be between 0 and 1 inclusive, got {params.r2_threshold}"

@@ -125,9 +125,8 @@ class _SignalChannelEngine:
 
     def update(self, bar: CompletedBar, trend: TrendResult, state: ChannelState, params: ParameterSet) -> tuple[ChannelResult, ChannelState]:
         next_state = ChannelState(bars=[ChannelBar(bar.raw.timestamp_et, trend.price, bar.raw.high, bar.raw.low)])
-        effective_trend = TrendLabel.UP if self.pred_high is not None else TrendLabel.DOWN
+        effective_trend = TrendLabel.DOWN if self.pred_high is not None else TrendLabel.UP
         return ChannelResult(self.pred_high, self.pred_low, effective_trend, None, None, None, None, None, None, None, None, None, 1), next_state
-
 
 @pytest.mark.parametrize(
     ("direction", "previous_threshold", "price", "pred_high", "pred_low", "expected_decision"),
@@ -136,7 +135,7 @@ class _SignalChannelEngine:
         (Direction.SELL, 100.0, 105.0, None, 110.0, DecisionLabel.SELL),
     ],
 )
-def test_auto_signal_updates_threshold_and_resets_trend_and_channel_for_next_bar(
+def test_auto_signal_updates_threshold_and_retains_trend_and_channel_for_next_bar(
     direction: Direction,
     previous_threshold: float,
     price: float,
@@ -159,9 +158,13 @@ def test_auto_signal_updates_threshold_and_resets_trend_and_channel_for_next_bar
     assert transition.record.active_threshold == previous_threshold
     assert transition.record.decision.decision is expected_decision
     assert transition.next_state_after_persist.active_threshold == price
-    assert not transition.next_state_after_persist.trend.bars
+    assert [item.price for item in transition.next_state_after_persist.trend.bars] == [
+        price
+    ]
     assert not transition.next_state_after_persist.trend.valid_slopes
-    assert transition.next_state_after_persist.channel == ChannelState.empty()
+    assert [item.price for item in transition.next_state_after_persist.channel.bars] == [
+        price
+    ]
 
 
 @pytest.mark.parametrize(
