@@ -73,13 +73,12 @@ def test_auto_with_configured_threshold_uses_that_initial_value() -> None:
 @pytest.mark.parametrize(
     ("direction", "best_price", "best_order_price", "expected_reward"),
     [
-        (Direction.BUY, 90.0, 95.0, 90.0 / 95.0),
-        (Direction.SELL, 110.0, 105.0, 105.0 / 110.0),
-        (Direction.BUY, 100.0, 100.0, 1.0),
-        (Direction.BUY, 100.0, 110.0, 100.0 / 110.0),
+        (Direction.BUY, 90.0, 95.0, 0.5),
+        (Direction.SELL, 110.0, 105.0, 0.5),
+        (Direction.BUY, 90.0, 110.0, 1.0),
     ],
 )
-def test_runtime_statistics_builds_best_price_proximity_reward(
+def test_runtime_statistics_builds_threshold_distance_reward_and_penalizes_signal_count(
     direction: Direction, best_price: float, best_order_price: float, expected_reward: float,
 ) -> None:
     context = RunContext("run-1", "AAPL", date(2025, 1, 2), _params(), direction, ThresholdMode.FIXED, 100.0, RunMode.BACKTEST, None, datetime(2025, 1, 2, 9, 0, tzinfo=ET))
@@ -91,20 +90,30 @@ def test_runtime_statistics_builds_best_price_proximity_reward(
 
     assert summary.best_reward == pytest.approx(expected_reward)
     assert 0 <= summary.best_reward <= 1
-    assert summary.efficiency == pytest.approx(summary.best_reward / 2)
+    assert summary.efficiency == pytest.approx(summary.best_reward ** 2)
 
 
-@pytest.mark.parametrize(("best_price", "best_order_price"), [(0.0, 100.0), (100.0, 0.0)])
-def test_runtime_statistics_returns_null_reward_for_zero_price(best_price: float, best_order_price: float) -> None:
+def test_runtime_statistics_returns_null_reward_when_best_price_equals_first_threshold() -> None:
     context = RunContext("run-1", "AAPL", date(2025, 1, 2), _params(), Direction.BUY, ThresholdMode.FIXED, 100.0, RunMode.BACKTEST, None, datetime(2025, 1, 2, 9, 0, tzinfo=ET))
     state = RuntimeState.empty(context.parameter_set, 100.0)
     state.processed_bar_count = 2
-    state.statistics = DailyRunStatistics(100.0, best_price, best_order_price, 2)
+    state.statistics = DailyRunStatistics(100.0, 100.0, 95.0, 2)
 
     summary = build_completed_summary(context, state, datetime(2025, 1, 2, 16, 0, tzinfo=ET))
 
     assert summary.best_reward is None
     assert summary.efficiency is None
+
+
+def test_runtime_statistics_returns_zero_reward_and_efficiency_without_signals() -> None:
+    context = RunContext("run-1", "AAPL", date(2025, 1, 2), _params(), Direction.BUY, ThresholdMode.FIXED, 100.0, RunMode.BACKTEST, None, datetime(2025, 1, 2, 9, 0, tzinfo=ET))
+    state = RuntimeState.empty(context.parameter_set, 100.0)
+    state.processed_bar_count = 2
+
+    summary = build_completed_summary(context, state, datetime(2025, 1, 2, 16, 0, tzinfo=ET))
+
+    assert summary.best_reward == 0.0
+    assert summary.efficiency == 0.0
 
 
 class _SignalTrendEngine:
@@ -341,7 +350,7 @@ def test_scanner_skips_non_trading_day_and_exports_one_multi_day_csv(tmp_path) -
     rows = database.connection.execute("SELECT run_id, trade_date, status FROM single_day_run ORDER BY trade_date").fetchall()
     assert [(row["run_id"], row["trade_date"], row["status"]) for row in rows] == [("run-p1", "2025-01-02", "COMPLETED"), ("run-p1", "2025-01-03", "SKIPPED")]
     aggregate = database.connection.execute("SELECT status, avg_signal_count_per_day, avg_best_reward_per_day, avg_efficiency_per_day FROM run_summary WHERE run_id='run-p1'").fetchone()
-    assert tuple(aggregate) == ("COMPLETED", 0.0, None, None)
+    assert tuple(aggregate) == ("COMPLETED", 0.0, 0.0, 0.0)
 
 
 def test_schema_shape_mismatch_preserves_existing_columns_and_rows(tmp_path) -> None:

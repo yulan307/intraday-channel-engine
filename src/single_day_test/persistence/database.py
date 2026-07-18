@@ -13,7 +13,7 @@ from ..domain.enums import RunStatus
 from ..domain.errors import PersistenceError
 from ..domain.models import ProcessedBarRecord, RawBar, RunContext, RunSummary, SignalEvent, TradingSession
 
-SCHEMA_VERSION = "channel_mix_v1"
+SCHEMA_VERSION = "reward_efficiency_v2"
 
 PROCESSED_BAR_COLUMNS = [
     "run_id", "date", "timestamp", "symbol", "trade_date", "mode", "bar_source", "direction", "parameter_set_id",
@@ -108,10 +108,12 @@ class Database:
           signal_count INTEGER NOT NULL, avg_signal_count_per_day REAL,
           avg_best_reward_per_day REAL, avg_efficiency_per_day REAL,
           max_signal_count_per_day INTEGER, max_best_reward_per_day REAL, max_efficiency_per_day REAL,
+          max_best_reward_days TEXT, max_efficiency_days TEXT,
           started_at_epoch INTEGER NOT NULL, ended_at_epoch INTEGER NOT NULL, error_type TEXT, error_message TEXT,
           CHECK (status IN ('COMPLETED', 'FAILED', 'SKIPPED')));
         ''')
         self._ensure_processed_bar_columns()
+        self._ensure_run_summary_columns()
         self.connection.execute(
             "INSERT INTO schema_meta VALUES ('schema_version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -137,6 +139,22 @@ class Database:
             if name not in columns:
                 self.connection.execute(
                     f"ALTER TABLE processed_1m_bar ADD COLUMN {name} {declared_type}"
+                )
+
+    def _ensure_run_summary_columns(self) -> None:
+        """Add aggregate metric-date fields to existing compatible databases."""
+        columns = {
+            row[1]
+            for row in self.connection.execute("PRAGMA table_info(run_summary)")
+        }
+        additions = {
+            "max_best_reward_days": "TEXT",
+            "max_efficiency_days": "TEXT",
+        }
+        for name, declared_type in additions.items():
+            if name not in columns:
+                self.connection.execute(
+                    f"ALTER TABLE run_summary ADD COLUMN {name} {declared_type}"
                 )
 
 
@@ -271,6 +289,10 @@ class SqliteRepositories:
         signal_counts = [row['signal_count'] for row in completed]
         rewards = [row['best_reward'] for row in completed if row['best_reward'] is not None]
         efficiencies = [row['efficiency'] for row in completed if row['efficiency'] is not None]
+        max_reward = max(rewards) if rewards else None
+        max_efficiency = max(efficiencies) if efficiencies else None
+        max_reward_days = self._joined_metric_days(completed, 'best_reward', max_reward)
+        max_efficiency_days = self._joined_metric_days(completed, 'efficiency', max_efficiency)
         failures = [row for row in daily_rows if row['status'] == RunStatus.FAILED.value]
         first_failure = failures[0] if failures else None
         self.database.connection.execute(
@@ -278,8 +300,9 @@ class SqliteRepositories:
                  run_id, status, processed_bar_count, signal_count,
                  avg_signal_count_per_day, avg_best_reward_per_day, avg_efficiency_per_day,
                  max_signal_count_per_day, max_best_reward_per_day, max_efficiency_per_day,
+                 max_best_reward_days, max_efficiency_days,
                  started_at_epoch, ended_at_epoch, error_type, error_message
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(run_id) DO UPDATE SET
                  status=excluded.status, processed_bar_count=excluded.processed_bar_count,
                  signal_count=excluded.signal_count, avg_signal_count_per_day=excluded.avg_signal_count_per_day,
@@ -288,6 +311,8 @@ class SqliteRepositories:
                  max_signal_count_per_day=excluded.max_signal_count_per_day,
                  max_best_reward_per_day=excluded.max_best_reward_per_day,
                  max_efficiency_per_day=excluded.max_efficiency_per_day,
+                 max_best_reward_days=excluded.max_best_reward_days,
+                 max_efficiency_days=excluded.max_efficiency_days,
                  started_at_epoch=excluded.started_at_epoch, ended_at_epoch=excluded.ended_at_epoch,
                  error_type=excluded.error_type, error_message=excluded.error_message''',
             (
@@ -298,13 +323,27 @@ class SqliteRepositories:
                 sum(rewards) / len(rewards) if rewards else None,
                 sum(efficiencies) / len(efficiencies) if efficiencies else None,
                 max(signal_counts) if signal_counts else None,
-                max(rewards) if rewards else None,
-                max(efficiencies) if efficiencies else None,
+                max_reward,
+                max_efficiency,
+                max_reward_days,
+                max_efficiency_days,
                 min(row['started_at_epoch'] for row in daily_rows),
                 max(row['ended_at_epoch'] or row['started_at_epoch'] for row in daily_rows),
                 first_failure['error_type'] if first_failure else None,
                 first_failure['error_message'] if first_failure else None,
             ),
+        )
+
+    @staticmethod
+    def _joined_metric_days(
+        completed: Sequence[sqlite3.Row], metric: str, maximum: float | None
+    ) -> str | None:
+        if maximum is None:
+            return None
+        return ",".join(
+            row['trade_date']
+            for row in completed
+            if row[metric] == maximum
         )
 
     def export_processed_run_csv(self, run_id: str, records: Sequence[ProcessedBarRecord], output_dir: str | Path = Path("data")) -> Path:

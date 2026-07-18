@@ -464,8 +464,10 @@ snapshot, `TrendResult`, `ChannelResult`, and `DecisionResult` is expanded
 into a dedicated column with a stable prefix where needed (`trend_`,
 `channel_`, and `decision_`).
 
-The current `processed_1m_bar` schema metadata is `channel_mix_v1`. It also preserves
+The current database schema metadata is `reward_efficiency_v2`. It also preserves
 the raw request metadata `bar_size`, `what_to_show`, `use_rth`, and `source`.
+Upgrading to this schema appends missing summary fields only; existing rows are
+not recalculated, reset, or overwritten, and the appended fields remain null.
 The previous `phase3_ibapi_v1`, `phase3_ibapi_v2`, `phase3_ibapi_v3`, and `phase3_ibapi_v4` schemas are incompatible
 and are cleared once during database
 initialization; its data is intentionally not migrated or retained. No JSON
@@ -1348,10 +1350,10 @@ key is unchanged.
 At terminal state it stores `first_threshold`, `signal_count`, `best_price`,
 `best_order_price`, and `efficiency`. Statistics use runtime `trend_price` and
 signal-event price: BUY selects minima and SELL selects maxima. `best_reward`
-is the symmetric price proximity
-`min(best_price / best_order_price, best_order_price / best_price)` between the
-two best prices.
-No-signal days store `signal_count = 0` and null price/reward/efficiency values.
+is `min(1, abs(best_order_price - first_threshold) / abs(best_price - first_threshold))`.
+Missing inputs or a zero denominator on a signaled day leave reward/efficiency
+null, and `efficiency` is `best_reward ** signal_count`.
+No-signal days store `signal_count = 0`, reward `0`, and efficiency `0`.
 Backtest holds processed records in memory and exports one full-schema CSV per
 run ID; it does not write `processed_1m_bar` to SQLite. Live keeps SQLite
 processed-Bar persistence.
@@ -1360,9 +1362,11 @@ processed-Bar persistence.
 processed Bars/signals and `avg_signal_count_per_day`,
 `avg_best_reward_per_day`, `avg_efficiency_per_day`,
 `max_signal_count_per_day`, `max_best_reward_per_day`, and
-`max_efficiency_per_day`. Averages include only
-completed days that processed Bars; zero-signal days contribute to signal-count
-average but are excluded from reward and efficiency averages. Any failed day
+`max_efficiency_per_day`, `max_best_reward_days`, and `max_efficiency_days`.
+The two date fields contain all comma-separated, date-ordered ties for the
+respective maximum. Averages include only
+completed days that processed Bars; zero-signal days contribute zero to all
+three averages. Any failed day
 makes the scan summary FAILED, while skipped days do not.
 
 ## Live connection recovery current state
