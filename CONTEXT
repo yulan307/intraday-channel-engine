@@ -23,9 +23,11 @@ Implemented scope:
   used for the current Bar decision. Its `decision` value is null when no
   signal triggers, and otherwise is `BUY` or `SELL`. There are no JSON payload
   columns and no persisted `_et` columns.
-- The SQLite schema metadata is `channel_mix_v1`. Initialization creates missing
-  tables without clearing or rebuilding existing data; it forward-adds the
-  dedicated Channel-mix processed-bar columns when they are absent.
+- The SQLite schema metadata is `reward_efficiency_v2`. Initialization creates
+  missing tables without clearing or rebuilding existing data; it forward-adds
+  dedicated Channel-mix processed-bar and reward/efficiency summary columns
+  when they are absent. Existing rows are not reset or recalculated; newly
+  appended fields remain null on those rows.
 
 - Phase 8 runs one manually started Windows Live Paper process per different
   symbol. Each uses required `temporary_directory/<run_id>.sqlite3`, a normal
@@ -75,15 +77,19 @@ Implemented scope:
   and resets the rearm state, while Trend and Channel state remain unchanged.
 - `single_day_run` records `threshold_update_rate`, the actual first threshold,
   processed-Bar count, signal count, and direction-aware daily
-  best-price/reward/efficiency metrics. Reward is the symmetric price proximity
-  `min(best_price / best_order_price, best_order_price / best_price)` between
-  the best signal price and best `trend_price`; zero prices produce null reward
-  and efficiency.
+  best-price/reward/efficiency metrics. For a day with one or more signals,
+  `best_reward` is `min(1, abs(best_order_price - first_threshold) /
+  abs(best_price - first_threshold))`; a missing first threshold or price, or a
+  zero denominator on a signaled day, produces null reward and efficiency.
+  A completed no-signal day produces zero reward and efficiency. `efficiency` is
+  `best_reward ** signal_count`, so additional triggered signals reduce the
+  score when reward is below one.
   It uses `(run_id, trade_date)` keys. `run_summary` has one scan-level row per
   `run_id`, with total counts plus averages across completed days that processed
-  Bars. It also records maximum daily signal count, reward, and efficiency.
-  No-signal days contribute zero to average signal count and are excluded from
-  reward and efficiency averages.
+  Bars. It also records maximum daily signal count, reward, and efficiency,
+  plus the comma-separated trade dates tied for each metric maximum.
+  No-signal days contribute zero to average signal count, reward, and
+  efficiency averages.
   Non-trading days are `SKIPPED`; failures are `FAILED`; later dates continue.
   Partial processed rows from failed dates remain in the one multi-day
   `data/<run_id>.csv` export. Backtest retains processed records in memory and

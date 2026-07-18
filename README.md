@@ -139,16 +139,24 @@ Each raw Bar also stores an ET, zone-aware, minute-rounded `timestamp` beside
 its canonical IBAPI epoch `date`. At each terminal daily run, `single_day_run`
 stores the actual first threshold, triggered signal count, and direction-aware
 best `trend_price` / signal price. BUY selects minima and SELL selects maxima.
-No-signal days store zero signals and null price, reward, and efficiency
-statistics. `best_reward` is the symmetric price proximity
-`min(best_price / best_order_price, best_order_price / best_price)` between the
-best signal price and best `trend_price`; `efficiency` is that reward
-divided by signal count.
+No-signal days store zero signals, reward, and efficiency; their price fields
+remain null. `best_reward` is
+`min(1, abs(best_order_price - first_threshold) / abs(best_price - first_threshold))`.
+Missing inputs or a zero denominator on a signaled day produce null reward and
+efficiency.
+`efficiency` is `best_reward ** signal_count`, penalizing additional triggered
+signals whenever reward is below one.
 For each `run_id`, `run_summary` stores total processed Bars and signals plus
 the average signal count, reward, and efficiency over completed days that
-processed Bars. Reward and efficiency averages exclude no-signal days. It also
-stores maximum daily signal count, reward, and efficiency. A failed day makes
+processed Bars. Reward and efficiency averages include no-signal days as zero.
+It also
+stores maximum daily signal count, reward, and efficiency. It also stores
+`max_best_reward_days` and `max_efficiency_days`: all trade dates tied for the
+respective maximum, ordered by date and comma-separated. A failed day makes
 the scan summary `FAILED`; skipped days do not.
+When an existing database upgrades to `reward_efficiency_v2`, initialization
+only appends missing summary columns. It does not reset, recalculate, or rewrite
+historical rows; the newly appended fields are null for those rows.
 
 Backtest startup defaults are stored in the local, ignored `configs/backtest.yaml`.
 Use `configs/backtest_config_sample.yaml` as the tracked setup template when

@@ -1913,6 +1913,8 @@ avg_efficiency_per_day   REAL NULL
 max_signal_count_per_day INTEGER NULL
 max_best_reward_per_day  REAL NULL
 max_efficiency_per_day   REAL NULL
+max_best_reward_days     TEXT NULL
+max_efficiency_days      TEXT NULL
 
 started_at_et           TIMESTAMP NOT NULL
 ended_at_et             TIMESTAMP NOT NULL
@@ -2633,18 +2635,23 @@ subscription. Other error categories retain their explicit local handling.
 
 ## 30. Current run statistics storage
 
-The database schema metadata is `channel_mix_v1`; initialization creates missing
-tables without rebuilding existing data and forward-adds dedicated Channel-mix
-processed-bar columns when absent. `raw_1m_bar.timestamp` is a minute-rounded,
+The database schema metadata is `reward_efficiency_v2`; initialization creates
+missing tables without rebuilding existing data and forward-adds dedicated
+Channel-mix processed-bar and reward/efficiency summary columns when absent. `raw_1m_bar.timestamp` is a minute-rounded,
 America/New_York-aware ISO timestamp in addition to the canonical IBAPI epoch
 `date`.
+The reward/efficiency schema upgrade only appends missing summary fields;
+historical metric values are not recalculated or overwritten, and appended
+fields are null on existing rows.
 
 `single_day_run` is the daily statistics record. It persists the first actual
 threshold, processed-Bar count, triggered signal count, and direction-aware
 best `trend_price` and signal-event price. BUY selects minima and SELL selects
-maxima. `best_reward` is the symmetric price proximity
-`min(best_price / best_order_price, best_order_price / best_price)`.
-No-signal days and zero prices leave price/reward/efficiency null.
+maxima. `best_reward` is
+`min(1, abs(best_order_price - first_threshold) / abs(best_price - first_threshold))`.
+No-signal days store zero reward and efficiency. Missing inputs and a zero
+denominator on a signaled day leave price/reward/efficiency null. `efficiency`
+is `best_reward ** signal_count`.
 
 Backtest does not persist `processed_1m_bar` to SQLite. It holds each accepted
 processed record in memory for one `run_id` and writes one full-schema CSV after
@@ -2653,7 +2660,9 @@ SQLite processed-Bar audit path. Backtest retains SQLite `signal_event` rows.
 
 `run_summary` is a scan-level table keyed by `run_id`, not a daily table. It
 stores aggregate processed Bar/signal totals, daily averages, and maximum daily
-signal count/reward/efficiency over completed dates that processed Bars.
+signal count/reward/efficiency over completed dates that processed Bars. It
+stores comma-separated, date-ordered ties in `max_best_reward_days` and
+`max_efficiency_days`.
 Zero-signal dates count toward average and maximum signal count but are excluded
 from reward and efficiency aggregates. A failed daily run makes the aggregate
 status FAILED; skipped dates do not.

@@ -1,5 +1,7 @@
 # Revision History
 
+| 2026-07-18 | `domain/metrics.py`, `application/summary_service.py`, SQLite run summaries, and tests | Replaced daily reward with the capped first-threshold distance ratio and changed efficiency to reward raised to the day's triggered signal count. Completed no-signal days score zero for both metrics. `run_summary` now records comma-separated dates tied for maximum reward and efficiency. Schema upgrades append missing columns only and do not reset, overwrite, or recalculate historical rows. | Updated README, CONTEXT, current-state design documents, and this revision history. |
+
 | 2026-07-17 | Channel prediction engine, parameter CSV, SQLite/CSV audit persistence, and Channel tests | Added required `curr_mix_ratio`, separate last/current prediction audit fields, normalized sigmoid blending, and forward-compatible processed-bar column migration. Current predictions use the fixed delayed distance after `2 * delay`; first-segment final predictions remain null. | Updated README, CONTEXT, current development/flow/phase documentation, and this revision history. |
 
 | 2026-07-17 | Phase 8 current-state documentation and `docs/archive/phase8_draft.md` | Consolidated the implemented Phase 8 design, flow, and plan into maintained current-state documents. Moved the historical decision draft to the ignored archive and removed it from Git tracking. | Updated development design, flow design, phase plan, and this revision history. |
