@@ -17,7 +17,7 @@ from single_day_test.domain.parameters import ParameterSet
 from single_day_test.ib.config import IbConfig
 from single_day_test.ib.gateway import IbApiGateway, LiveBarCallbacks, _PendingRequest
 from single_day_test.ib.services import HistoricalBarService, TradingSessionService
-from single_day_test.persistence.database import Database, SqliteRepositories
+from single_day_test.persistence.database import SCHEMA_VERSION, Database, SqliteRepositories
 
 ET = ZoneInfo("America/New_York")
 
@@ -144,7 +144,7 @@ def test_nonconforming_schema_is_not_cleared(tmp_path) -> None:
     path = tmp_path / "legacy.sqlite3"
     sqlite3.connect(path).execute("CREATE TABLE raw_1m_bar (timestamp TEXT)").connection.commit()
     database = Database(path); database.initialize()
-    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "reward_efficiency_v2"
+    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == SCHEMA_VERSION
     assert [row[1] for row in database.connection.execute("PRAGMA table_info(raw_1m_bar)")] == ["timestamp"]
 
 
@@ -159,7 +159,7 @@ def test_previous_schema_version_is_advanced_without_rebuild(tmp_path) -> None:
     database.connection.commit()
     database.initialize()
     assert database.connection.execute("SELECT COUNT(*) FROM raw_1m_bar").fetchone()[0] == 1
-    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == "reward_efficiency_v2"
+    assert database.connection.execute("SELECT value FROM schema_meta WHERE key='schema_version'").fetchone()[0] == SCHEMA_VERSION
     columns = {row[1] for row in database.connection.execute("PRAGMA table_info(processed_1m_bar)")}
     assert {"date", "timestamp", "wap", "bar_count", "bar_size", "what_to_show", "use_rth", "source", "trend_slope", "channel_window", "channel_pred_high", "decision_triggered", "curr_mix_ratio", "channel_last_pred_high", "channel_last_pred_low", "channel_curr_pred_high", "channel_curr_pred_low", "channel_mix"} <= columns
     assert not {"slope_std_window", "dev_window", "residual_window"} & columns
@@ -168,7 +168,7 @@ def test_previous_schema_version_is_advanced_without_rebuild(tmp_path) -> None:
     assert not {"parameter_snapshot_json", "trend_json", "channel_json", "decision_json"} & columns
 
 
-def test_reward_efficiency_schema_upgrade_preserves_persisted_metrics(tmp_path) -> None:
+def test_dual_reward_schema_upgrade_preserves_legacy_metrics_without_backfill(tmp_path) -> None:
     database = Database(tmp_path / "metrics-upgrade.sqlite3")
     database.initialize()
     repositories = SqliteRepositories(database)
@@ -176,13 +176,19 @@ def test_reward_efficiency_schema_upgrade_preserves_persisted_metrics(tmp_path) 
     started = datetime(2025, 1, 15, 9, 0, tzinfo=ET)
     context = RunContext("run-upgrade", "AAPL", date(2025, 1, 15), params, Direction.BUY, ThresholdMode.FIXED, 100.0, RunMode.BACKTEST, None, started)
     repositories.create(context)
-    repositories.complete_with_summary(
-        RunSummary(
-            "run-upgrade", "AAPL", context.trade_date, RunMode.BACKTEST,
-            Direction.BUY, "p1", {}, 2, 2, RunStatus.COMPLETED, started,
-            datetime(2025, 1, 15, 16, 0, tzinfo=ET), None, None,
-            100.0, 90.0, 95.0, 90.0 / 95.0, (90.0 / 95.0) / 2,
-        )
+    database.connection.execute(
+        "UPDATE single_day_run SET status='COMPLETED', ended_at_epoch=?, "
+        "processed_bar_count=2, signal_count=2, best_reward=?, efficiency=? "
+        "WHERE run_id='run-upgrade'",
+        (int(datetime(2025, 1, 15, 16, 0, tzinfo=ET).timestamp()), 0.9, 0.81),
+    )
+    database.connection.execute(
+        '''INSERT INTO run_summary (
+             run_id, status, processed_bar_count, signal_count,
+             avg_best_reward_per_day, avg_efficiency_per_day,
+             started_at_epoch, ended_at_epoch
+           ) VALUES ('run-upgrade', 'COMPLETED', 2, 2, 0.9, 0.81, ?, ?)''',
+        (int(started.timestamp()), int(datetime(2025, 1, 15, 16, 0, tzinfo=ET).timestamp())),
     )
     database.connection.execute(
         "UPDATE schema_meta SET value='reward_efficiency_v1' WHERE key='schema_version'"
@@ -192,17 +198,16 @@ def test_reward_efficiency_schema_upgrade_preserves_persisted_metrics(tmp_path) 
     database.initialize()
 
     daily = database.connection.execute(
-        "SELECT best_reward, efficiency FROM single_day_run WHERE run_id='run-upgrade'"
+        "SELECT best_reward, efficiency, first_trigger_reward, full_position_reward "
+        "FROM single_day_run WHERE run_id='run-upgrade'"
     ).fetchone()
     aggregate = database.connection.execute(
         "SELECT avg_best_reward_per_day, avg_efficiency_per_day, "
-        "max_best_reward_days, max_efficiency_days FROM run_summary "
+        "avg_first_trigger_reward_per_day, avg_full_position_reward_per_day FROM run_summary "
         "WHERE run_id='run-upgrade'"
     ).fetchone()
-    assert tuple(daily) == pytest.approx((90.0 / 95.0, (90.0 / 95.0) / 2))
-    assert tuple(aggregate[:2]) == pytest.approx((90.0 / 95.0, (90.0 / 95.0) / 2))
-    assert aggregate["max_best_reward_days"] == "2025-01-15"
-    assert aggregate["max_efficiency_days"] == "2025-01-15"
+    assert tuple(daily) == (0.9, 0.81, None, None)
+    assert tuple(aggregate) == (0.9, 0.81, None, None)
 
 
 def test_run_summary_upgrade_appends_metric_day_columns_without_rewriting_rows(tmp_path) -> None:
@@ -231,10 +236,12 @@ def test_run_summary_upgrade_appends_metric_day_columns_without_rewriting_rows(t
 
     row = database.connection.execute(
         "SELECT avg_best_reward_per_day, avg_efficiency_per_day, "
-        "max_best_reward_days, max_efficiency_days FROM run_summary "
+        "max_best_reward_days, max_efficiency_days, "
+        "avg_first_trigger_reward_per_day, avg_full_position_reward_per_day "
+        "FROM run_summary "
         "WHERE run_id='legacy'"
     ).fetchone()
-    assert tuple(row) == (0.9, 0.9, None, None)
+    assert tuple(row) == (0.9, 0.9, None, None, None, None)
 
 
 def test_initialize_adds_channel_mix_columns_to_an_old_processed_table(tmp_path) -> None:
@@ -326,25 +333,26 @@ def test_terminal_daily_statistics_and_scan_summary_use_persisted_prices(tmp_pat
         DecisionResult(DecisionLabel.NO_BUY, 0, False),
     )
     second = replace(base, timestamp_et=datetime(2025, 1, 15, 9, 31, tzinfo=ET), trend=TrendResult(90.0, None, None, None, None, None, None, 1), decision=DecisionResult(DecisionLabel.BUY, 1, True))
-    summary = RunSummary("run-1", "AAPL", context.trade_date, RunMode.BACKTEST, Direction.BUY, "p1", {}, 2, 1, RunStatus.COMPLETED, started, datetime(2025, 1, 15, 16, 0, tzinfo=ET), None, None, 100.0, 90.0, 90.0, 1.0, 1.0)
+    summary = RunSummary("run-1", "AAPL", context.trade_date, RunMode.BACKTEST, Direction.BUY, "p1", {}, 2, 1, RunStatus.COMPLETED, started, datetime(2025, 1, 15, 16, 0, tzinfo=ET), None, None, 100.0, 90.0, 1.0, 0.5)
     repositories.complete_with_summary(summary)
-    daily = database.connection.execute("SELECT first_threshold, processed_bar_count, signal_count, best_price, best_order_price, best_reward, efficiency FROM single_day_run").fetchone()
-    assert tuple(daily) == pytest.approx((100.0, 2, 1, 90.0, 90.0, 1.0, 1.0))
-    aggregate = database.connection.execute("SELECT run_id, processed_bar_count, signal_count, avg_signal_count_per_day, avg_best_reward_per_day, avg_efficiency_per_day, max_signal_count_per_day, max_best_reward_per_day, max_efficiency_per_day, max_best_reward_days, max_efficiency_days FROM run_summary").fetchone()
+    daily = database.connection.execute("SELECT first_threshold, processed_bar_count, signal_count, best_price, first_trigger_reward, full_position_reward, best_order_price, best_reward, efficiency FROM single_day_run").fetchone()
+    assert tuple(daily[:6]) == pytest.approx((100.0, 2, 1, 90.0, 1.0, 0.5))
+    assert tuple(daily[6:]) == (None, None, None)
+    aggregate = database.connection.execute("SELECT run_id, processed_bar_count, signal_count, avg_signal_count_per_day, avg_first_trigger_reward_per_day, avg_full_position_reward_per_day, max_signal_count_per_day, max_first_trigger_reward_per_day, max_full_position_reward_per_day, max_first_trigger_reward_days, max_full_position_reward_days FROM run_summary").fetchone()
     assert aggregate["run_id"] == "run-1"
-    assert tuple(aggregate)[1:9] == pytest.approx((2, 1, 1.0, 1.0, 1.0, 1, 1.0, 1.0))
-    assert aggregate["max_best_reward_days"] == "2025-01-15"
-    assert aggregate["max_efficiency_days"] == "2025-01-15"
+    assert tuple(aggregate)[1:9] == pytest.approx((2, 1, 1.0, 1.0, 0.5, 1, 1.0, 0.5))
+    assert aggregate["max_first_trigger_reward_days"] == "2025-01-15"
+    assert aggregate["max_full_position_reward_days"] == "2025-01-15"
 
     zero_context = RunContext("run-zero", "AAPL", context.trade_date, params, Direction.SELL, ThresholdMode.FIXED, 0.0, RunMode.BACKTEST, None, started)
     repositories.create(zero_context)
     zero_record = replace(base, run_id="run-zero", direction=Direction.SELL, active_threshold=0.0)
     with database.transaction():
         repositories.insert(zero_record)
-    zero_summary = RunSummary("run-zero", "AAPL", zero_context.trade_date, RunMode.BACKTEST, Direction.SELL, "p1", {}, 1, 0, RunStatus.COMPLETED, started, datetime(2025, 1, 15, 16, 0, tzinfo=ET), None, None, None, None, None, 0.0, 0.0)
+    zero_summary = RunSummary("run-zero", "AAPL", zero_context.trade_date, RunMode.BACKTEST, Direction.SELL, "p1", {}, 1, 0, RunStatus.COMPLETED, started, datetime(2025, 1, 15, 16, 0, tzinfo=ET), None, None, None, None, 0.0, 0.0)
     repositories.complete_with_summary(zero_summary)
-    zero_daily = database.connection.execute("SELECT signal_count, best_price, best_order_price, best_reward, efficiency FROM single_day_run WHERE run_id='run-zero'").fetchone()
-    assert tuple(zero_daily) == (0, None, None, 0.0, 0.0)
+    zero_daily = database.connection.execute("SELECT signal_count, best_price, first_trigger_reward, full_position_reward FROM single_day_run WHERE run_id='run-zero'").fetchone()
+    assert tuple(zero_daily) == (0, None, 0.0, 0.0)
 
 
 def test_run_summary_lists_all_tied_maximum_metric_days(tmp_path) -> None:
@@ -354,7 +362,7 @@ def test_run_summary_lists_all_tied_maximum_metric_days(tmp_path) -> None:
     params = ParameterSet("p1", 3, 3, 0.8, 95.0, 95.0, 1, 1)
     started = datetime(2025, 1, 2, 9, 0, tzinfo=ET)
 
-    for trade_date, reward, efficiency in (
+    for trade_date, first_reward, full_reward in (
         (date(2025, 1, 2), 0.8, 0.64),
         (date(2025, 1, 3), 0.9, 0.81),
         (date(2025, 1, 6), 0.9, 0.81),
@@ -366,19 +374,19 @@ def test_run_summary_lists_all_tied_maximum_metric_days(tmp_path) -> None:
                 "run-many", "AAPL", trade_date, RunMode.BACKTEST, Direction.BUY,
                 "p1", {}, 1, 1, RunStatus.COMPLETED, started,
                 datetime(2025, 1, 2, 16, 0, tzinfo=ET), None, None,
-                100.0, 90.0, 95.0, reward, efficiency,
+                100.0, 90.0, first_reward, full_reward,
             ),
             write_run_summary=False,
         )
 
     repositories.save_run_summary("run-many")
     summary = database.connection.execute(
-        "SELECT avg_best_reward_per_day, avg_efficiency_per_day, "
-        "max_best_reward_per_day, max_efficiency_per_day, "
-        "max_best_reward_days, max_efficiency_days "
+        "SELECT avg_first_trigger_reward_per_day, avg_full_position_reward_per_day, "
+        "max_first_trigger_reward_per_day, max_full_position_reward_per_day, "
+        "max_first_trigger_reward_days, max_full_position_reward_days "
         "FROM run_summary WHERE run_id='run-many'"
     ).fetchone()
 
     assert tuple(summary[:4]) == pytest.approx(((0.8 + 0.9 + 0.9) / 3, (0.64 + 0.81 + 0.81) / 3, 0.9, 0.81))
-    assert summary["max_best_reward_days"] == "2025-01-03,2025-01-06"
-    assert summary["max_efficiency_days"] == "2025-01-03,2025-01-06"
+    assert summary["max_first_trigger_reward_days"] == "2025-01-03,2025-01-06"
+    assert summary["max_full_position_reward_days"] == "2025-01-03,2025-01-06"

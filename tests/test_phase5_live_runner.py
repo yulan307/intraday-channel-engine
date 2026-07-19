@@ -107,8 +107,8 @@ def test_live_runner_processes_hist_live_end_and_writes_jsonl(tmp_path: Path) ->
     assert summary.status is RunStatus.COMPLETED
     assert feed.waited == 1 and feed.closed
     assert database.connection.execute("SELECT status FROM single_day_run").fetchone()[0] == "COMPLETED"
-    daily_statistics = database.connection.execute("SELECT processed_bar_count, signal_count, best_reward, efficiency FROM single_day_run").fetchone()
-    assert tuple(daily_statistics) == (3, 0, 0.0, 0.0)
+    daily_statistics = database.connection.execute("SELECT processed_bar_count, signal_count, first_trigger_reward, full_position_reward FROM single_day_run").fetchone()
+    assert tuple(daily_statistics) == (3, 0, None, None)
     assert [row[0] for row in database.connection.execute("SELECT bar_source FROM processed_1m_bar ORDER BY date")] == ["HIST", "LIVE", "END"]
     assert database.connection.execute("SELECT status FROM run_summary").fetchone()[0] == "COMPLETED"
     events = [json.loads(line)["event"] for line in (tmp_path / "logs" / "phase5-run.jsonl").read_text(encoding="utf-8").splitlines()]

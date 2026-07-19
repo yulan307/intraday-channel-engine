@@ -39,5 +39,5 @@ def process_bar(context: RunContext, bar: CompletedBar, state: RuntimeState, tre
         context.threshold_mode, active_threshold, trend.price, decision,
         context.direction, context.threshold_update_rate,
     )
-    statistics = state.statistics.record(active_threshold, trend.price, event.price if event else None, context.direction)
+    statistics = state.statistics.record(active_threshold, trend.price, context.direction)
     return BarProcessTransition(record,RuntimeState(next_trend,next_channel,next_decision,next_active_threshold,True,state.processed_bar_count+1,[*state.signal_events,*([event] if event else [])],statistics),event)

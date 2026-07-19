@@ -1838,8 +1838,13 @@ best_price              REAL NULL
 best_order_price        REAL NULL
 best_reward             REAL NULL
 efficiency              REAL NULL
+first_trigger_reward    REAL NULL
+full_position_reward    REAL NULL
 PRIMARY KEY(run_id, trade_date)
 ```
+
+`best_order_price`, `best_reward`, and `efficiency` are retained legacy columns;
+new runs do not write them.
 
 ### 21.4 `processed_1m_bar`
 
@@ -1915,6 +1920,12 @@ max_best_reward_per_day  REAL NULL
 max_efficiency_per_day   REAL NULL
 max_best_reward_days     TEXT NULL
 max_efficiency_days      TEXT NULL
+avg_first_trigger_reward_per_day REAL NULL
+avg_full_position_reward_per_day REAL NULL
+max_first_trigger_reward_per_day REAL NULL
+max_full_position_reward_per_day REAL NULL
+max_first_trigger_reward_days TEXT NULL
+max_full_position_reward_days TEXT NULL
 
 started_at_et           TIMESTAMP NOT NULL
 ended_at_et             TIMESTAMP NOT NULL
@@ -1922,6 +1933,9 @@ ended_at_et             TIMESTAMP NOT NULL
 error_type              TEXT NULL
 error_message           TEXT NULL
 ```
+
+The best-reward/efficiency aggregate columns are retained for historical rows;
+new summaries write only the dual Backtest Reward aggregate columns.
 
 Signal 的 timestamp、price、break_count 保存在 `signal_event`，Summary 保存总数。
 
@@ -2635,23 +2649,24 @@ subscription. Other error categories retain their explicit local handling.
 
 ## 30. Current run statistics storage
 
-The database schema metadata is `reward_efficiency_v2`; initialization creates
+The database schema metadata is `dual_backtest_reward_v1`; initialization creates
 missing tables without rebuilding existing data and forward-adds dedicated
-Channel-mix processed-bar and reward/efficiency summary columns when absent. `raw_1m_bar.timestamp` is a minute-rounded,
+Channel-mix processed-bar and dual-Reward summary columns when absent. `raw_1m_bar.timestamp` is a minute-rounded,
 America/New_York-aware ISO timestamp in addition to the canonical IBAPI epoch
 `date`.
-The reward/efficiency schema upgrade only appends missing summary fields;
-historical metric values are not recalculated or overwritten, and appended
-fields are null on existing rows.
+The schema upgrade only appends missing fields; historical best-reward and
+efficiency values are not recalculated or overwritten, and new Reward fields
+are null on existing rows.
 
 `single_day_run` is the daily statistics record. It persists the first actual
 threshold, processed-Bar count, triggered signal count, and direction-aware
-best `trend_price` and signal-event price. BUY selects minima and SELL selects
-maxima. `best_reward` is
-`min(1, abs(best_order_price - first_threshold) / abs(best_price - first_threshold))`.
-No-signal days store zero reward and efficiency. Missing inputs and a zero
-denominator on a signaled day leave price/reward/efficiency null. `efficiency`
-is `best_reward ** signal_count`.
+best `trend_price`. Backtest computes each ordered signal's directional
+threshold improvement relative to the same-day best improvement and clips it
+to `[0, 1]`. `first_trigger_reward` is the first score;
+`full_position_reward` is `sum(signal_reward_i / 2**i)` for one-based trigger
+order, so the remaining planned share contributes zero. No-signal Backtest days
+store two zeros. Missing inputs or a non-positive directional denominator on a
+signaled day leave both metrics null. Live leaves both metrics null.
 
 Backtest does not persist `processed_1m_bar` to SQLite. It holds each accepted
 processed record in memory for one `run_id` and writes one full-schema CSV after
@@ -2660,11 +2675,11 @@ SQLite processed-Bar audit path. Backtest retains SQLite `signal_event` rows.
 
 `run_summary` is a scan-level table keyed by `run_id`, not a daily table. It
 stores aggregate processed Bar/signal totals, daily averages, and maximum daily
-signal count/reward/efficiency over completed dates that processed Bars. It
-stores comma-separated, date-ordered ties in `max_best_reward_days` and
-`max_efficiency_days`.
-Zero-signal dates count toward average and maximum signal count but are excluded
-from reward and efficiency aggregates. A failed daily run makes the aggregate
+signal count plus both Backtest Reward averages and maxima over completed dates
+that processed Bars. It stores comma-separated, date-ordered ties in
+`max_first_trigger_reward_days` and `max_full_position_reward_days`.
+Zero-signal dates contribute zero to both Reward averages; null Reward values
+are excluded. A failed daily run makes the aggregate
 status FAILED; skipped dates do not.
 
 ## 31. Live connection recovery current state

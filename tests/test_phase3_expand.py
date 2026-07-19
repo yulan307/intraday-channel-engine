@@ -12,7 +12,7 @@ from single_day_test.application.bar_processor import process_bar
 from single_day_test.bar_feed.base import FeedEvent
 from single_day_test.domain.enums import BarSource, DecisionLabel, Direction, FeedStatus, RunMode, RunStatus, ThresholdMode, TrendLabel
 from single_day_test.domain.errors import InputValidationError, NonTradingDayError
-from single_day_test.domain.models import ChannelBar, ChannelResult, CompletedBar, RawBar, RunContext, TrendBar, TrendResult
+from single_day_test.domain.models import ChannelBar, ChannelResult, CompletedBar, RawBar, RunContext, SignalEvent, TrendBar, TrendResult
 from single_day_test.domain.parameters import ParameterSet
 from single_day_test.domain.states import ChannelState, DailyRunStatistics, RuntimeState, TrendState
 from single_day_test.engine.channel_engine import ChannelEngine
@@ -71,49 +71,72 @@ def test_auto_with_configured_threshold_uses_that_initial_value() -> None:
 
 
 @pytest.mark.parametrize(
-    ("direction", "best_price", "best_order_price", "expected_reward"),
+    ("direction", "best_price", "order_prices", "expected_first", "expected_full"),
     [
-        (Direction.BUY, 90.0, 95.0, 0.5),
-        (Direction.SELL, 110.0, 105.0, 0.5),
-        (Direction.BUY, 90.0, 110.0, 1.0),
+        (Direction.BUY, 90.0, (90.0,), 1.0, 0.5),
+        (Direction.SELL, 110.0, (110.0,), 1.0, 0.5),
+        (Direction.BUY, 90.0, (94.0, 90.0), 0.6, 0.55),
+        (Direction.BUY, 90.0, (95.0, 90.0, 92.0), 0.5, 0.6),
     ],
 )
-def test_runtime_statistics_builds_threshold_distance_reward_and_penalizes_signal_count(
-    direction: Direction, best_price: float, best_order_price: float, expected_reward: float,
+def test_runtime_statistics_builds_dual_position_rewards(
+    direction: Direction, best_price: float, order_prices: tuple[float, ...],
+    expected_first: float, expected_full: float,
 ) -> None:
     context = RunContext("run-1", "AAPL", date(2025, 1, 2), _params(), direction, ThresholdMode.FIXED, 100.0, RunMode.BACKTEST, None, datetime(2025, 1, 2, 9, 0, tzinfo=ET))
     state = RuntimeState.empty(context.parameter_set, 100.0)
     state.processed_bar_count = 2
-    state.statistics = DailyRunStatistics(100.0, best_price, best_order_price, 2)
+    state.statistics = DailyRunStatistics(100.0, best_price)
+    decision = DecisionLabel.BUY if direction is Direction.BUY else DecisionLabel.SELL
+    state.signal_events = [
+        SignalEvent("run-1", datetime(2025, 1, 2, 10, index, tzinfo=ET), decision, price, 1)
+        for index, price in enumerate(order_prices)
+    ]
 
     summary = build_completed_summary(context, state, datetime(2025, 1, 2, 16, 0, tzinfo=ET))
 
-    assert summary.best_reward == pytest.approx(expected_reward)
-    assert 0 <= summary.best_reward <= 1
-    assert summary.efficiency == pytest.approx(summary.best_reward ** 2)
+    assert summary.first_trigger_reward == pytest.approx(expected_first)
+    assert summary.full_position_reward == pytest.approx(expected_full)
 
 
-def test_runtime_statistics_returns_null_reward_when_best_price_equals_first_threshold() -> None:
+@pytest.mark.parametrize(("first_threshold", "best_price"), [(100.0, 100.0), (100.0, 105.0), (None, 90.0)])
+def test_runtime_statistics_returns_null_rewards_for_invalid_opportunity(
+    first_threshold: float | None, best_price: float,
+) -> None:
     context = RunContext("run-1", "AAPL", date(2025, 1, 2), _params(), Direction.BUY, ThresholdMode.FIXED, 100.0, RunMode.BACKTEST, None, datetime(2025, 1, 2, 9, 0, tzinfo=ET))
     state = RuntimeState.empty(context.parameter_set, 100.0)
     state.processed_bar_count = 2
-    state.statistics = DailyRunStatistics(100.0, 100.0, 95.0, 2)
+    state.statistics = DailyRunStatistics(first_threshold, best_price)
+    state.signal_events = [SignalEvent("run-1", datetime(2025, 1, 2, 10, 0, tzinfo=ET), DecisionLabel.BUY, 95.0, 1)]
 
     summary = build_completed_summary(context, state, datetime(2025, 1, 2, 16, 0, tzinfo=ET))
 
-    assert summary.best_reward is None
-    assert summary.efficiency is None
+    assert summary.first_trigger_reward is None
+    assert summary.full_position_reward is None
 
 
-def test_runtime_statistics_returns_zero_reward_and_efficiency_without_signals() -> None:
+def test_live_summary_leaves_dual_backtest_rewards_null_with_a_signal() -> None:
+    context = RunContext("run-live", "AAPL", date(2025, 1, 2), _params(), Direction.BUY, ThresholdMode.FIXED, 100.0, RunMode.LIVE_PAPER, None, datetime(2025, 1, 2, 9, 0, tzinfo=ET))
+    state = RuntimeState.empty(context.parameter_set, 100.0)
+    state.processed_bar_count = 2
+    state.statistics = DailyRunStatistics(100.0, 90.0)
+    state.signal_events = [SignalEvent("run-live", datetime(2025, 1, 2, 10, 0, tzinfo=ET), DecisionLabel.BUY, 90.0, 1)]
+
+    summary = build_completed_summary(context, state, datetime(2025, 1, 2, 16, 0, tzinfo=ET))
+
+    assert summary.first_trigger_reward is None
+    assert summary.full_position_reward is None
+
+
+def test_runtime_statistics_returns_zero_dual_rewards_without_signals() -> None:
     context = RunContext("run-1", "AAPL", date(2025, 1, 2), _params(), Direction.BUY, ThresholdMode.FIXED, 100.0, RunMode.BACKTEST, None, datetime(2025, 1, 2, 9, 0, tzinfo=ET))
     state = RuntimeState.empty(context.parameter_set, 100.0)
     state.processed_bar_count = 2
 
     summary = build_completed_summary(context, state, datetime(2025, 1, 2, 16, 0, tzinfo=ET))
 
-    assert summary.best_reward == 0.0
-    assert summary.efficiency == 0.0
+    assert summary.first_trigger_reward == 0.0
+    assert summary.full_position_reward == 0.0
 
 
 class _SignalTrendEngine:
@@ -349,7 +372,7 @@ def test_scanner_skips_non_trading_day_and_exports_one_multi_day_csv(tmp_path) -
     assert (tmp_path / "data" / "run-p1.csv").exists()
     rows = database.connection.execute("SELECT run_id, trade_date, status FROM single_day_run ORDER BY trade_date").fetchall()
     assert [(row["run_id"], row["trade_date"], row["status"]) for row in rows] == [("run-p1", "2025-01-02", "COMPLETED"), ("run-p1", "2025-01-03", "SKIPPED")]
-    aggregate = database.connection.execute("SELECT status, avg_signal_count_per_day, avg_best_reward_per_day, avg_efficiency_per_day FROM run_summary WHERE run_id='run-p1'").fetchone()
+    aggregate = database.connection.execute("SELECT status, avg_signal_count_per_day, avg_first_trigger_reward_per_day, avg_full_position_reward_per_day FROM run_summary WHERE run_id='run-p1'").fetchone()
     assert tuple(aggregate) == ("COMPLETED", 0.0, 0.0, 0.0)
 
 

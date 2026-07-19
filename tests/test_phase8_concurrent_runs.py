@@ -48,9 +48,9 @@ def _database(path: Path) -> Database:
 def test_completed_private_database_merge_source_wins_and_aligns_columns(tmp_path: Path) -> None:
     master, temporary = _database(tmp_path / "master.sqlite3"), _database(tmp_path / "temp.sqlite3")
     try:
-        master.connection.execute("INSERT INTO run_summary VALUES ('r', 'COMPLETED', 1, 1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, 1, NULL, NULL)")
+        master.connection.execute("INSERT INTO run_summary (run_id, status, processed_bar_count, signal_count, started_at_epoch, ended_at_epoch) VALUES ('r', 'COMPLETED', 1, 1, 1, 1)")
         temporary.connection.execute("ALTER TABLE run_summary ADD COLUMN phase8_note TEXT")
-        temporary.connection.execute("INSERT INTO run_summary VALUES ('r', 'COMPLETED', 2, 3, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 2, 2, NULL, NULL, 'source')")
+        temporary.connection.execute("INSERT INTO run_summary (run_id, status, processed_bar_count, signal_count, started_at_epoch, ended_at_epoch, phase8_note) VALUES ('r', 'COMPLETED', 2, 3, 2, 2, 'source')")
         master.connection.commit(); temporary.connection.commit()
     finally:
         master.close(); temporary.close()

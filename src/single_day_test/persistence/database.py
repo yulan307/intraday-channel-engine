@@ -13,7 +13,7 @@ from ..domain.enums import RunStatus
 from ..domain.errors import PersistenceError
 from ..domain.models import ProcessedBarRecord, RawBar, RunContext, RunSummary, SignalEvent, TradingSession
 
-SCHEMA_VERSION = "reward_efficiency_v2"
+SCHEMA_VERSION = "dual_backtest_reward_v1"
 
 PROCESSED_BAR_COLUMNS = [
     "run_id", "date", "timestamp", "symbol", "trade_date", "mode", "bar_source", "direction", "parameter_set_id",
@@ -72,7 +72,7 @@ class Database:
           fixed_threshold REAL, threshold_update_rate REAL NOT NULL, status TEXT NOT NULL, started_at_epoch INTEGER NOT NULL,
           ended_at_epoch INTEGER, error_type TEXT, error_message TEXT, recovery_count INTEGER NOT NULL, first_threshold REAL,
           processed_bar_count INTEGER NOT NULL, signal_count INTEGER NOT NULL, best_price REAL, best_order_price REAL,
-          best_reward REAL, efficiency REAL,
+          best_reward REAL, efficiency REAL, first_trigger_reward REAL, full_position_reward REAL,
           PRIMARY KEY(run_id, trade_date));
         CREATE TABLE IF NOT EXISTS processed_1m_bar (
           run_id TEXT NOT NULL, date INTEGER NOT NULL, timestamp TEXT NOT NULL, symbol TEXT NOT NULL, trade_date TEXT NOT NULL,
@@ -109,10 +109,14 @@ class Database:
           avg_best_reward_per_day REAL, avg_efficiency_per_day REAL,
           max_signal_count_per_day INTEGER, max_best_reward_per_day REAL, max_efficiency_per_day REAL,
           max_best_reward_days TEXT, max_efficiency_days TEXT,
+          avg_first_trigger_reward_per_day REAL, avg_full_position_reward_per_day REAL,
+          max_first_trigger_reward_per_day REAL, max_full_position_reward_per_day REAL,
+          max_first_trigger_reward_days TEXT, max_full_position_reward_days TEXT,
           started_at_epoch INTEGER NOT NULL, ended_at_epoch INTEGER NOT NULL, error_type TEXT, error_message TEXT,
           CHECK (status IN ('COMPLETED', 'FAILED', 'SKIPPED')));
         ''')
         self._ensure_processed_bar_columns()
+        self._ensure_single_day_run_columns()
         self._ensure_run_summary_columns()
         self.connection.execute(
             "INSERT INTO schema_meta VALUES ('schema_version', ?) "
@@ -141,8 +145,24 @@ class Database:
                     f"ALTER TABLE processed_1m_bar ADD COLUMN {name} {declared_type}"
                 )
 
+    def _ensure_single_day_run_columns(self) -> None:
+        """Add Backtest reward fields without rewriting historical daily rows."""
+        columns = {
+            row[1]
+            for row in self.connection.execute("PRAGMA table_info(single_day_run)")
+        }
+        additions = {
+            "first_trigger_reward": "REAL",
+            "full_position_reward": "REAL",
+        }
+        for name, declared_type in additions.items():
+            if name not in columns:
+                self.connection.execute(
+                    f"ALTER TABLE single_day_run ADD COLUMN {name} {declared_type}"
+                )
+
     def _ensure_run_summary_columns(self) -> None:
-        """Add aggregate metric-date fields to existing compatible databases."""
+        """Add aggregate reward fields without rewriting historical summaries."""
         columns = {
             row[1]
             for row in self.connection.execute("PRAGMA table_info(run_summary)")
@@ -150,6 +170,12 @@ class Database:
         additions = {
             "max_best_reward_days": "TEXT",
             "max_efficiency_days": "TEXT",
+            "avg_first_trigger_reward_per_day": "REAL",
+            "avg_full_position_reward_per_day": "REAL",
+            "max_first_trigger_reward_per_day": "REAL",
+            "max_full_position_reward_per_day": "REAL",
+            "max_first_trigger_reward_days": "TEXT",
+            "max_full_position_reward_days": "TEXT",
         }
         for name, declared_type in additions.items():
             if name not in columns:
@@ -203,7 +229,27 @@ class SqliteRepositories:
 
     def create(self, context: RunContext) -> None:
         with self.database.transaction():
-            self.database.connection.execute('INSERT INTO single_day_run VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', (context.run_id,context.trade_date.isoformat(),context.symbol,context.mode.value,context.live_phase.value if context.live_phase else None,context.direction.value,context.parameter_set.parameter_set_id,json.dumps(context.parameter_set.__dict__),context.threshold_mode.value,context.fixed_threshold,context.threshold_update_rate,RunStatus.RUNNING.value,_epoch(context.started_at_et),None,None,None,0,None,0,0,None,None,None,None))
+            self.database.connection.execute(
+                '''INSERT INTO single_day_run (
+                     run_id, trade_date, symbol, mode, live_phase, direction,
+                     parameter_set_id, parameter_snapshot_json, threshold_mode,
+                     fixed_threshold, threshold_update_rate, status,
+                     started_at_epoch, ended_at_epoch, error_type, error_message,
+                     recovery_count, first_threshold, processed_bar_count,
+                     signal_count, best_price
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (
+                    context.run_id, context.trade_date.isoformat(), context.symbol,
+                    context.mode.value,
+                    context.live_phase.value if context.live_phase else None,
+                    context.direction.value, context.parameter_set.parameter_set_id,
+                    json.dumps(context.parameter_set.__dict__),
+                    context.threshold_mode.value, context.fixed_threshold,
+                    context.threshold_update_rate, RunStatus.RUNNING.value,
+                    _epoch(context.started_at_et), None, None, None, 0, None, 0, 0,
+                    None,
+                ),
+            )
 
     def mark_completed(self, run_id: str, trade_date: date, ended_at_et: datetime) -> None: self._mark(run_id, trade_date, RunStatus.COMPLETED, ended_at_et, None)
     def mark_failed(self, run_id: str, trade_date: date, ended_at_et: datetime, error_type: str, error_message: str) -> None: self._mark(run_id, trade_date, RunStatus.FAILED, ended_at_et, (error_type,error_message))
@@ -257,11 +303,11 @@ class SqliteRepositories:
             error_message = summary.error_message if status is RunStatus.FAILED else None
             self.database.connection.execute(
                 '''UPDATE single_day_run SET status=?, ended_at_epoch=?, error_type=?, error_message=?,
-                   first_threshold=?, processed_bar_count=?, signal_count=?, best_price=?, best_order_price=?,
-                   best_reward=?, efficiency=? WHERE run_id=? AND trade_date=?''',
+                   first_threshold=?, processed_bar_count=?, signal_count=?, best_price=?,
+                   first_trigger_reward=?, full_position_reward=? WHERE run_id=? AND trade_date=?''',
                 (status.value, _epoch(summary.ended_at_et), error_type, error_message,
                  summary.first_threshold, summary.processed_bar_count, summary.signal_count, summary.best_price,
-                 summary.best_order_price, summary.best_reward, summary.efficiency,
+                 summary.first_trigger_reward, summary.full_position_reward,
                  summary.run_id, summary.trade_date.isoformat()),
             )
             if write_run_summary:
@@ -287,32 +333,33 @@ class SqliteRepositories:
             status = RunStatus.SKIPPED
         completed = [row for row in daily_rows if row['status'] == RunStatus.COMPLETED.value and row['processed_bar_count'] > 0]
         signal_counts = [row['signal_count'] for row in completed]
-        rewards = [row['best_reward'] for row in completed if row['best_reward'] is not None]
-        efficiencies = [row['efficiency'] for row in completed if row['efficiency'] is not None]
-        max_reward = max(rewards) if rewards else None
-        max_efficiency = max(efficiencies) if efficiencies else None
-        max_reward_days = self._joined_metric_days(completed, 'best_reward', max_reward)
-        max_efficiency_days = self._joined_metric_days(completed, 'efficiency', max_efficiency)
+        first_rewards = [row['first_trigger_reward'] for row in completed if row['first_trigger_reward'] is not None]
+        full_rewards = [row['full_position_reward'] for row in completed if row['full_position_reward'] is not None]
+        max_first_reward = max(first_rewards) if first_rewards else None
+        max_full_reward = max(full_rewards) if full_rewards else None
+        max_first_reward_days = self._joined_metric_days(completed, 'first_trigger_reward', max_first_reward)
+        max_full_reward_days = self._joined_metric_days(completed, 'full_position_reward', max_full_reward)
         failures = [row for row in daily_rows if row['status'] == RunStatus.FAILED.value]
         first_failure = failures[0] if failures else None
         self.database.connection.execute(
             '''INSERT INTO run_summary (
                  run_id, status, processed_bar_count, signal_count,
-                 avg_signal_count_per_day, avg_best_reward_per_day, avg_efficiency_per_day,
-                 max_signal_count_per_day, max_best_reward_per_day, max_efficiency_per_day,
-                 max_best_reward_days, max_efficiency_days,
+                 avg_signal_count_per_day, max_signal_count_per_day,
+                 avg_first_trigger_reward_per_day, avg_full_position_reward_per_day,
+                 max_first_trigger_reward_per_day, max_full_position_reward_per_day,
+                 max_first_trigger_reward_days, max_full_position_reward_days,
                  started_at_epoch, ended_at_epoch, error_type, error_message
                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(run_id) DO UPDATE SET
                  status=excluded.status, processed_bar_count=excluded.processed_bar_count,
                  signal_count=excluded.signal_count, avg_signal_count_per_day=excluded.avg_signal_count_per_day,
-                 avg_best_reward_per_day=excluded.avg_best_reward_per_day,
-                 avg_efficiency_per_day=excluded.avg_efficiency_per_day,
                  max_signal_count_per_day=excluded.max_signal_count_per_day,
-                 max_best_reward_per_day=excluded.max_best_reward_per_day,
-                 max_efficiency_per_day=excluded.max_efficiency_per_day,
-                 max_best_reward_days=excluded.max_best_reward_days,
-                 max_efficiency_days=excluded.max_efficiency_days,
+                 avg_first_trigger_reward_per_day=excluded.avg_first_trigger_reward_per_day,
+                 avg_full_position_reward_per_day=excluded.avg_full_position_reward_per_day,
+                 max_first_trigger_reward_per_day=excluded.max_first_trigger_reward_per_day,
+                 max_full_position_reward_per_day=excluded.max_full_position_reward_per_day,
+                 max_first_trigger_reward_days=excluded.max_first_trigger_reward_days,
+                 max_full_position_reward_days=excluded.max_full_position_reward_days,
                  started_at_epoch=excluded.started_at_epoch, ended_at_epoch=excluded.ended_at_epoch,
                  error_type=excluded.error_type, error_message=excluded.error_message''',
             (
@@ -320,13 +367,13 @@ class SqliteRepositories:
                 sum(row['processed_bar_count'] for row in daily_rows),
                 sum(row['signal_count'] for row in daily_rows),
                 sum(signal_counts) / len(signal_counts) if signal_counts else None,
-                sum(rewards) / len(rewards) if rewards else None,
-                sum(efficiencies) / len(efficiencies) if efficiencies else None,
                 max(signal_counts) if signal_counts else None,
-                max_reward,
-                max_efficiency,
-                max_reward_days,
-                max_efficiency_days,
+                sum(first_rewards) / len(first_rewards) if first_rewards else None,
+                sum(full_rewards) / len(full_rewards) if full_rewards else None,
+                max_first_reward,
+                max_full_reward,
+                max_first_reward_days,
+                max_full_reward_days,
                 min(row['started_at_epoch'] for row in daily_rows),
                 max(row['ended_at_epoch'] or row['started_at_epoch'] for row in daily_rows),
                 first_failure['error_type'] if first_failure else None,
