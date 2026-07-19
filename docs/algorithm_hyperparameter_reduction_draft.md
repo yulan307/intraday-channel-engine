@@ -76,11 +76,12 @@ segment switches.
 
 ### 3.5 The current evaluation metric is diagnostic, not executable PnL
 
-`best_reward` now measures the capped distance of the best signal price from
-the first threshold relative to the best same-day trend price, and `efficiency`
-raises that score to the day's signal count. These are useful diagnostics for
-signal quality and trigger frequency, but they still use completed-day data and
-are not tradable return metrics. They must not be the sole selection objective
+Backtest now records two diagnostics. `first_trigger_reward` measures the first
+signal price against the first threshold and direction-aware same-day best
+trend price. `full_position_reward` applies geometric planned-share weights
+`1/2, 1/4, 1/8, ...` to all ordered signal rewards, with the unallocated share
+contributing zero. They still use completed-day data and are not tradable return
+metrics. They must not be the sole selection objective
 for live parameters.
 
 ## 4. Reference Algorithm Families

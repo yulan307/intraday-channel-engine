@@ -138,25 +138,25 @@ Bar auditing.
 Each raw Bar also stores an ET, zone-aware, minute-rounded `timestamp` beside
 its canonical IBAPI epoch `date`. At each terminal daily run, `single_day_run`
 stores the actual first threshold, triggered signal count, and direction-aware
-best `trend_price` / signal price. BUY selects minima and SELL selects maxima.
-No-signal days store zero signals, reward, and efficiency; their price fields
-remain null. `best_reward` is
-`min(1, abs(best_order_price - first_threshold) / abs(best_price - first_threshold))`.
-Missing inputs or a zero denominator on a signaled day produce null reward and
-efficiency.
-`efficiency` is `best_reward ** signal_count`, penalizing additional triggered
-signals whenever reward is below one.
+best `trend_price`. Backtest also stores `first_trigger_reward` and
+`full_position_reward`. Each signal price is scored against the first threshold
+and same-day best price using BUY/SELL-aware distance. The first metric is the
+first signal score; the full-position metric is
+`sum(signal_reward_i / 2**i)` for one-based trigger order, so unallocated shares
+contribute zero. A Backtest no-signal day stores zero for both metrics; missing
+inputs or a non-positive directional denominator on a signaled day produce
+null metrics. Live leaves both fields null.
 For each `run_id`, `run_summary` stores total processed Bars and signals plus
-the average signal count, reward, and efficiency over completed days that
-processed Bars. Reward and efficiency averages include no-signal days as zero.
-It also
-stores maximum daily signal count, reward, and efficiency. It also stores
-`max_best_reward_days` and `max_efficiency_days`: all trade dates tied for the
-respective maximum, ordered by date and comma-separated. A failed day makes
-the scan summary `FAILED`; skipped days do not.
-When an existing database upgrades to `reward_efficiency_v2`, initialization
-only appends missing summary columns. It does not reset, recalculate, or rewrite
-historical rows; the newly appended fields are null for those rows.
+the average signal count and both Backtest rewards over completed days that
+processed Bars. Reward averages include no-signal days as zero and exclude null
+metrics. It also stores each metric's maximum and comma-separated, date-ordered
+ties in `max_first_trigger_reward_days` and
+`max_full_position_reward_days`. A failed day makes the scan summary `FAILED`;
+skipped days do not.
+When an existing database upgrades to `dual_backtest_reward_v1`, initialization
+only appends missing fields. It does not reset, recalculate, or rewrite
+historical rows. Legacy best-reward/efficiency columns and values remain
+unchanged, while the new fields are null for old rows.
 
 Backtest startup defaults are stored in the local, ignored `configs/backtest.yaml`.
 Use `configs/backtest_config_sample.yaml` as the tracked setup template when
