@@ -71,17 +71,17 @@ def test_auto_with_configured_threshold_uses_that_initial_value() -> None:
 
 
 @pytest.mark.parametrize(
-    ("direction", "best_price", "order_prices", "expected_first", "expected_full"),
+    ("direction", "best_price", "order_prices", "expected_first", "expected_second", "expected_reward"),
     [
-        (Direction.BUY, 90.0, (90.0,), 1.0, 0.5),
-        (Direction.SELL, 110.0, (110.0,), 1.0, 0.5),
-        (Direction.BUY, 90.0, (94.0, 90.0), 0.6, 0.55),
-        (Direction.BUY, 90.0, (95.0, 90.0, 92.0), 0.5, 0.6),
+        (Direction.BUY, 90.0, (90.0,), 1.0, None, 1.0),
+        (Direction.SELL, 110.0, (110.0,), 1.0, None, 1.0),
+        (Direction.BUY, 90.0, (94.0, 90.0), 0.6, 1.0, 0.8),
+        (Direction.BUY, 90.0, (95.0, 90.0, 92.0), 0.5, 1.0, 0.75),
     ],
 )
-def test_runtime_statistics_builds_dual_position_rewards(
+def test_runtime_statistics_builds_two_operation_rewards(
     direction: Direction, best_price: float, order_prices: tuple[float, ...],
-    expected_first: float, expected_full: float,
+    expected_first: float, expected_second: float | None, expected_reward: float,
 ) -> None:
     context = RunContext("run-1", "AAPL", date(2025, 1, 2), _params(), direction, ThresholdMode.FIXED, 100.0, RunMode.BACKTEST, None, datetime(2025, 1, 2, 9, 0, tzinfo=ET))
     state = RuntimeState.empty(context.parameter_set, 100.0)
@@ -95,8 +95,9 @@ def test_runtime_statistics_builds_dual_position_rewards(
 
     summary = build_completed_summary(context, state, datetime(2025, 1, 2, 16, 0, tzinfo=ET))
 
-    assert summary.first_trigger_reward == pytest.approx(expected_first)
-    assert summary.full_position_reward == pytest.approx(expected_full)
+    assert summary.first_reward == pytest.approx(expected_first)
+    assert summary.second_reward == (pytest.approx(expected_second) if expected_second is not None else None)
+    assert summary.reward == pytest.approx(expected_reward)
 
 
 @pytest.mark.parametrize(("first_threshold", "best_price"), [(100.0, 100.0), (100.0, 105.0), (None, 90.0)])
@@ -111,11 +112,12 @@ def test_runtime_statistics_returns_null_rewards_for_invalid_opportunity(
 
     summary = build_completed_summary(context, state, datetime(2025, 1, 2, 16, 0, tzinfo=ET))
 
-    assert summary.first_trigger_reward is None
-    assert summary.full_position_reward is None
+    assert summary.first_reward is None
+    assert summary.second_reward is None
+    assert summary.reward is None
 
 
-def test_live_summary_leaves_dual_backtest_rewards_null_with_a_signal() -> None:
+def test_live_summary_leaves_two_operation_rewards_null_with_a_signal() -> None:
     context = RunContext("run-live", "AAPL", date(2025, 1, 2), _params(), Direction.BUY, ThresholdMode.FIXED, 100.0, RunMode.LIVE_PAPER, None, datetime(2025, 1, 2, 9, 0, tzinfo=ET))
     state = RuntimeState.empty(context.parameter_set, 100.0)
     state.processed_bar_count = 2
@@ -124,19 +126,21 @@ def test_live_summary_leaves_dual_backtest_rewards_null_with_a_signal() -> None:
 
     summary = build_completed_summary(context, state, datetime(2025, 1, 2, 16, 0, tzinfo=ET))
 
-    assert summary.first_trigger_reward is None
-    assert summary.full_position_reward is None
+    assert summary.first_reward is None
+    assert summary.second_reward is None
+    assert summary.reward is None
 
 
-def test_runtime_statistics_returns_zero_dual_rewards_without_signals() -> None:
+def test_runtime_statistics_returns_zero_two_operation_rewards_without_signals() -> None:
     context = RunContext("run-1", "AAPL", date(2025, 1, 2), _params(), Direction.BUY, ThresholdMode.FIXED, 100.0, RunMode.BACKTEST, None, datetime(2025, 1, 2, 9, 0, tzinfo=ET))
     state = RuntimeState.empty(context.parameter_set, 100.0)
     state.processed_bar_count = 2
 
     summary = build_completed_summary(context, state, datetime(2025, 1, 2, 16, 0, tzinfo=ET))
 
-    assert summary.first_trigger_reward == 0.0
-    assert summary.full_position_reward == 0.0
+    assert summary.first_reward == 0.0
+    assert summary.second_reward == 0.0
+    assert summary.reward == 0.0
 
 
 class _SignalTrendEngine:
@@ -372,8 +376,8 @@ def test_scanner_skips_non_trading_day_and_exports_one_multi_day_csv(tmp_path) -
     assert (tmp_path / "data" / "run-p1.csv").exists()
     rows = database.connection.execute("SELECT run_id, trade_date, status FROM single_day_run ORDER BY trade_date").fetchall()
     assert [(row["run_id"], row["trade_date"], row["status"]) for row in rows] == [("run-p1", "2025-01-02", "COMPLETED"), ("run-p1", "2025-01-03", "SKIPPED")]
-    aggregate = database.connection.execute("SELECT status, avg_signal_count_per_day, avg_first_trigger_reward_per_day, avg_full_position_reward_per_day FROM run_summary WHERE run_id='run-p1'").fetchone()
-    assert tuple(aggregate) == ("COMPLETED", 0.0, 0.0, 0.0)
+    aggregate = database.connection.execute("SELECT status, avg_signal_count_per_day, avg_first_reward_per_day, avg_second_reward_per_day, avg_reward_per_day FROM run_summary WHERE run_id='run-p1'").fetchone()
+    assert tuple(aggregate) == ("COMPLETED", 0.0, 0.0, 0.0, 0.0)
 
 
 def test_schema_shape_mismatch_preserves_existing_columns_and_rows(tmp_path) -> None:

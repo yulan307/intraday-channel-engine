@@ -168,7 +168,7 @@ def test_previous_schema_version_is_advanced_without_rebuild(tmp_path) -> None:
     assert not {"parameter_snapshot_json", "trend_json", "channel_json", "decision_json"} & columns
 
 
-def test_dual_reward_schema_upgrade_preserves_legacy_metrics_without_backfill(tmp_path) -> None:
+def test_two_operation_reward_schema_upgrade_preserves_legacy_metrics_without_backfill(tmp_path) -> None:
     database = Database(tmp_path / "metrics-upgrade.sqlite3")
     database.initialize()
     repositories = SqliteRepositories(database)
@@ -198,16 +198,17 @@ def test_dual_reward_schema_upgrade_preserves_legacy_metrics_without_backfill(tm
     database.initialize()
 
     daily = database.connection.execute(
-        "SELECT best_reward, efficiency, first_trigger_reward, full_position_reward "
+        "SELECT best_reward, efficiency, first_trigger_reward, full_position_reward, first_reward, second_reward, reward "
         "FROM single_day_run WHERE run_id='run-upgrade'"
     ).fetchone()
     aggregate = database.connection.execute(
         "SELECT avg_best_reward_per_day, avg_efficiency_per_day, "
-        "avg_first_trigger_reward_per_day, avg_full_position_reward_per_day FROM run_summary "
+        "avg_first_trigger_reward_per_day, avg_full_position_reward_per_day, "
+        "avg_first_reward_per_day, avg_second_reward_per_day, avg_reward_per_day FROM run_summary "
         "WHERE run_id='run-upgrade'"
     ).fetchone()
-    assert tuple(daily) == (0.9, 0.81, None, None)
-    assert tuple(aggregate) == (0.9, 0.81, None, None)
+    assert tuple(daily) == (0.9, 0.81, None, None, None, None, None)
+    assert tuple(aggregate) == (0.9, 0.81, None, None, None, None, None)
 
 
 def test_run_summary_upgrade_appends_metric_day_columns_without_rewriting_rows(tmp_path) -> None:
@@ -237,11 +238,12 @@ def test_run_summary_upgrade_appends_metric_day_columns_without_rewriting_rows(t
     row = database.connection.execute(
         "SELECT avg_best_reward_per_day, avg_efficiency_per_day, "
         "max_best_reward_days, max_efficiency_days, "
-        "avg_first_trigger_reward_per_day, avg_full_position_reward_per_day "
+        "avg_first_trigger_reward_per_day, avg_full_position_reward_per_day, "
+        "avg_first_reward_per_day, avg_second_reward_per_day, avg_reward_per_day "
         "FROM run_summary "
         "WHERE run_id='legacy'"
     ).fetchone()
-    assert tuple(row) == (0.9, 0.9, None, None, None, None)
+    assert tuple(row) == (0.9, 0.9, None, None, None, None, None, None, None)
 
 
 def test_initialize_adds_channel_mix_columns_to_an_old_processed_table(tmp_path) -> None:
@@ -333,39 +335,37 @@ def test_terminal_daily_statistics_and_scan_summary_use_persisted_prices(tmp_pat
         DecisionResult(DecisionLabel.NO_BUY, 0, False),
     )
     second = replace(base, timestamp_et=datetime(2025, 1, 15, 9, 31, tzinfo=ET), trend=TrendResult(90.0, None, None, None, None, None, None, 1), decision=DecisionResult(DecisionLabel.BUY, 1, True))
-    summary = RunSummary("run-1", "AAPL", context.trade_date, RunMode.BACKTEST, Direction.BUY, "p1", {}, 2, 1, RunStatus.COMPLETED, started, datetime(2025, 1, 15, 16, 0, tzinfo=ET), None, None, 100.0, 90.0, 1.0, 0.5)
+    summary = RunSummary("run-1", "AAPL", context.trade_date, RunMode.BACKTEST, Direction.BUY, "p1", {}, 2, 1, RunStatus.COMPLETED, started, datetime(2025, 1, 15, 16, 0, tzinfo=ET), None, None, 100.0, 90.0, 1.0, None, 1.0)
     repositories.complete_with_summary(summary)
-    daily = database.connection.execute("SELECT first_threshold, processed_bar_count, signal_count, best_price, first_trigger_reward, full_position_reward, best_order_price, best_reward, efficiency FROM single_day_run").fetchone()
-    assert tuple(daily[:6]) == pytest.approx((100.0, 2, 1, 90.0, 1.0, 0.5))
-    assert tuple(daily[6:]) == (None, None, None)
-    aggregate = database.connection.execute("SELECT run_id, processed_bar_count, signal_count, avg_signal_count_per_day, avg_first_trigger_reward_per_day, avg_full_position_reward_per_day, max_signal_count_per_day, max_first_trigger_reward_per_day, max_full_position_reward_per_day, max_first_trigger_reward_days, max_full_position_reward_days FROM run_summary").fetchone()
+    daily = database.connection.execute("SELECT first_threshold, processed_bar_count, signal_count, best_price, first_reward, second_reward, reward, best_order_price, best_reward, efficiency FROM single_day_run").fetchone()
+    assert tuple(daily[:7]) == pytest.approx((100.0, 2, 1, 90.0, 1.0, None, 1.0))
+    assert tuple(daily[7:]) == (None, None, None)
+    aggregate = database.connection.execute("SELECT run_id, processed_bar_count, signal_count, avg_signal_count_per_day, avg_first_reward_per_day, avg_second_reward_per_day, avg_reward_per_day, max_signal_count_per_day, max_first_reward_per_day, max_second_reward_per_day, max_reward_per_day FROM run_summary").fetchone()
     assert aggregate["run_id"] == "run-1"
-    assert tuple(aggregate)[1:9] == pytest.approx((2, 1, 1.0, 1.0, 0.5, 1, 1.0, 0.5))
-    assert aggregate["max_first_trigger_reward_days"] == "2025-01-15"
-    assert aggregate["max_full_position_reward_days"] == "2025-01-15"
+    assert tuple(aggregate)[1:] == pytest.approx((2, 1, 1.0, 1.0, None, 1.0, 1, 1.0, None, 1.0))
 
     zero_context = RunContext("run-zero", "AAPL", context.trade_date, params, Direction.SELL, ThresholdMode.FIXED, 0.0, RunMode.BACKTEST, None, started)
     repositories.create(zero_context)
     zero_record = replace(base, run_id="run-zero", direction=Direction.SELL, active_threshold=0.0)
     with database.transaction():
         repositories.insert(zero_record)
-    zero_summary = RunSummary("run-zero", "AAPL", zero_context.trade_date, RunMode.BACKTEST, Direction.SELL, "p1", {}, 1, 0, RunStatus.COMPLETED, started, datetime(2025, 1, 15, 16, 0, tzinfo=ET), None, None, None, None, 0.0, 0.0)
+    zero_summary = RunSummary("run-zero", "AAPL", zero_context.trade_date, RunMode.BACKTEST, Direction.SELL, "p1", {}, 1, 0, RunStatus.COMPLETED, started, datetime(2025, 1, 15, 16, 0, tzinfo=ET), None, None, None, None, 0.0, 0.0, 0.0)
     repositories.complete_with_summary(zero_summary)
-    zero_daily = database.connection.execute("SELECT signal_count, best_price, first_trigger_reward, full_position_reward FROM single_day_run WHERE run_id='run-zero'").fetchone()
-    assert tuple(zero_daily) == (0, None, 0.0, 0.0)
+    zero_daily = database.connection.execute("SELECT signal_count, best_price, first_reward, second_reward, reward FROM single_day_run WHERE run_id='run-zero'").fetchone()
+    assert tuple(zero_daily) == (0, None, 0.0, 0.0, 0.0)
 
 
-def test_run_summary_lists_all_tied_maximum_metric_days(tmp_path) -> None:
+def test_run_summary_aggregates_two_operation_rewards(tmp_path) -> None:
     database = Database(tmp_path / "metric-days.sqlite3")
     database.initialize()
     repositories = SqliteRepositories(database)
     params = ParameterSet("p1", 3, 3, 0.8, 95.0, 95.0, 1, 1)
     started = datetime(2025, 1, 2, 9, 0, tzinfo=ET)
 
-    for trade_date, first_reward, full_reward in (
-        (date(2025, 1, 2), 0.8, 0.64),
-        (date(2025, 1, 3), 0.9, 0.81),
-        (date(2025, 1, 6), 0.9, 0.81),
+    for trade_date, first_reward, second_reward, reward in (
+        (date(2025, 1, 2), 0.8, None, 0.8),
+        (date(2025, 1, 3), 0.9, 0.7, 0.8),
+        (date(2025, 1, 6), 0.9, 0.9, 0.9),
     ):
         context = RunContext("run-many", "AAPL", trade_date, params, Direction.BUY, ThresholdMode.FIXED, 100.0, RunMode.BACKTEST, None, started)
         repositories.create(context)
@@ -374,19 +374,16 @@ def test_run_summary_lists_all_tied_maximum_metric_days(tmp_path) -> None:
                 "run-many", "AAPL", trade_date, RunMode.BACKTEST, Direction.BUY,
                 "p1", {}, 1, 1, RunStatus.COMPLETED, started,
                 datetime(2025, 1, 2, 16, 0, tzinfo=ET), None, None,
-                100.0, 90.0, first_reward, full_reward,
+                100.0, 90.0, first_reward, second_reward, reward,
             ),
             write_run_summary=False,
         )
 
     repositories.save_run_summary("run-many")
     summary = database.connection.execute(
-        "SELECT avg_first_trigger_reward_per_day, avg_full_position_reward_per_day, "
-        "max_first_trigger_reward_per_day, max_full_position_reward_per_day, "
-        "max_first_trigger_reward_days, max_full_position_reward_days "
+        "SELECT avg_first_reward_per_day, avg_second_reward_per_day, avg_reward_per_day, "
+        "max_first_reward_per_day, max_second_reward_per_day, max_reward_per_day "
         "FROM run_summary WHERE run_id='run-many'"
     ).fetchone()
 
-    assert tuple(summary[:4]) == pytest.approx(((0.8 + 0.9 + 0.9) / 3, (0.64 + 0.81 + 0.81) / 3, 0.9, 0.81))
-    assert summary["max_first_trigger_reward_days"] == "2025-01-03,2025-01-06"
-    assert summary["max_full_position_reward_days"] == "2025-01-03,2025-01-06"
+    assert tuple(summary) == pytest.approx(((0.8 + 0.9 + 0.9) / 3, (0.7 + 0.9) / 2, (0.8 + 0.8 + 0.9) / 3, 0.9, 0.9, 0.9))

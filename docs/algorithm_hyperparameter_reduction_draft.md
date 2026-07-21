@@ -76,12 +76,11 @@ segment switches.
 
 ### 3.5 The current evaluation metric is diagnostic, not executable PnL
 
-Backtest now records two diagnostics. `first_trigger_reward` measures the first
-signal price against the first threshold and direction-aware same-day best
-trend price. `full_position_reward` applies geometric planned-share weights
-`1/2, 1/4, 1/8, ...` to all ordered signal rewards, with the unallocated share
-contributing zero. They still use completed-day data and are not tradable return
-metrics. They must not be the sole selection objective
+Backtest now records three diagnostics. `first_reward` measures the first signal
+price, `second_reward` measures only the second signal price, and `reward` is
+their average when both exist (or equals `first_reward` when only one exists).
+Later signals do not affect these metrics. They still use completed-day data and
+are not tradable return metrics. They must not be the sole selection objective
 for live parameters.
 
 ## 4. Reference Algorithm Families
