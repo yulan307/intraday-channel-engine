@@ -987,8 +987,8 @@ pred_center = (
     + last_trend_intercept
 )
 
-pred_high = pred_center + last_high_percentile
-pred_low = pred_center - last_low_percentile
+pred_high = exp(pred_center + last_high_percentile)
+pred_low = exp(pred_center - last_low_percentile)
 ```
 
 计算完成后，当前 Bar 的 `pred_high/pred_low` 固定，不因后续趋势切换而重算。
@@ -1819,6 +1819,10 @@ available from `n = 3`: they use the fitted intercept through `n <= delay`,
 then use coordinate `n - delay` through `n <= 2 * delay` and fixed `delay`
 afterward because the
 selected prefix endpoint is then always `delay` Bars behind the current Bar.
+Trend fits `log(HLC3)`, and Channel fits `log(HLC3)` with `log(high)` / `log(low)`
+residuals. Each channel prediction is converted back with `exp` before it is
+recorded or blended, so Decision continues to compare raw HLC3, raw thresholds,
+and raw `pred_*` values.
 Final `pred_*` is null before a valid last model, remains last-only while curr
 is unavailable, then becomes `last * (1 - mix) + curr * mix`. `mix` is
 `curr_mix_ratio` times a normalized k=4 sigmoid spanning 0 at `n = delay` to

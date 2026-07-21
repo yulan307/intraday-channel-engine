@@ -1417,6 +1417,11 @@ the switch-Bar last prediction at its former coordinate plus one (`delay + 1`
 in the stable range), and later last predictions advance without resetting the
 coordinate. Auto signals do not reset or freeze Channel state.
 
+Trend and Channel model calculations use log-price values: Trend fits
+`log(HLC3)`, and Channel fits `log(HLC3)` with `log(high)` / `log(low)`
+residuals. Every exposed prediction is restored with `exp`; Decision, threshold,
+signal-price, and statistics behavior remains in original-price units.
+
 ## Current Decision opposite-trend gate
 
 Decision keeps runtime-only `break_trend`, `trend_changed`, and `opposite_seen`.

@@ -1152,7 +1152,7 @@ def update(...):
 
     next_bars = append_with_limit(
         state.bars,
-        TrendBar(timestamp_et=bar.raw.timestamp_et, price=price),
+        TrendBar(timestamp_et=bar.raw.timestamp_et, price=log(price)),
         maxlen=params.trend_window,
     )
 
@@ -1294,8 +1294,8 @@ def calculate_prediction(
         + state.last_trend_intercept
     )
 
-    pred_high = center + state.last_high_percentile
-    pred_low = center - state.last_low_percentile
+    pred_high = exp(center + state.last_high_percentile)
+    pred_low = exp(center - state.last_low_percentile)
 
     return pred_high, pred_low, count
 ```
@@ -2742,6 +2742,12 @@ terminal path retains it without merging.
 `channel_window` must be at least `trend_window`. Channel
 returns raw `last_pred_high` / `last_pred_low`, raw `curr_pred_high` /
 `curr_pred_low`, and applied `mix` alongside final `pred_high` / `pred_low`.
+Trend regression uses `log(HLC3)` and Channel regression/residuals use
+`log(HLC3)`, `log(high)`, and `log(low)`; model slope, intercept, and
+percentile fields are consequently log-price values. Channel restores each
+prediction with `exp` before exposing or blending it. `TrendResult.price`,
+Decision price comparisons, thresholds, signal prices, and daily statistics
+remain original-price values.
 The latter remains the only Decision input. With `delay = trend_window // 2`,
 current predictions are null only for `n < 3`, use the fitted intercept for
 `3 <= n <= delay`, use forward coordinate `n - delay` through `n <= 2 * delay`,

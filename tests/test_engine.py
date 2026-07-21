@@ -50,8 +50,8 @@ def completed_bar(index: int, price: float) -> CompletedBar:
             symbol="AAPL",
             date=int(timestamp.timestamp()),
             open=price,
-            high=price + 1.0,
-            low=price - 1.0,
+            high=price * 1.01,
+            low=price * 0.99,
             close=price,
             volume=100.0,
             wap=price,
@@ -111,26 +111,29 @@ def test_trend_engine_warmup_then_classifies_and_preserves_input_state() -> None
         completed_bar(1, 2.0), state_after_first, params()
     )
     third, state_after_third = engine.update(
-        completed_bar(2, 3.0), state_after_second, params()
+        completed_bar(2, 4.0), state_after_second, params()
     )
     fourth, state_after_fourth = engine.update(
-        completed_bar(3, 4.0), state_after_third, params()
+        completed_bar(3, 8.0), state_after_third, params()
     )
 
     assert first.slope is None
     assert second.slope is None
-    assert third.slope == pytest.approx(1.0)
+    assert third.price == pytest.approx(4.0)
+    assert third.slope == pytest.approx(np.log(2.0))
     assert third.slope_std is None
     assert third.raw_trend is None
     assert fourth.slope_std == pytest.approx(0.0)
     assert fourth.raw_trend is TrendLabel.UP
     assert [item.price for item in state.bars] == []
-    assert [item.price for item in state_after_fourth.bars] == [2.0, 3.0, 4.0]
+    assert [item.price for item in state_after_fourth.bars] == pytest.approx(
+        [np.log(2.0), np.log(4.0), np.log(8.0)]
+    )
     fifth, state_after_fifth = engine.update(
-        completed_bar(4, 5.0), state_after_fourth, params()
+        completed_bar(4, 16.0), state_after_fourth, params()
     )
     _, state_after_sixth = engine.update(
-        completed_bar(5, 6.0), state_after_fifth, params()
+        completed_bar(5, 32.0), state_after_fifth, params()
     )
     assert fifth.slope_std == pytest.approx(0.0)
     assert state_after_sixth.valid_slopes.maxlen == 3
@@ -197,11 +200,11 @@ def test_channel_current_prediction_uses_delayed_forward_distance() -> None:
     channel_params = params(trend_window=10, channel_window=30)
 
     assert calculate_current_prediction(model, 2, channel_params) == (None, None)
-    assert calculate_current_prediction(model, 3, channel_params) == pytest.approx((15.0, 7.0))
-    assert calculate_current_prediction(model, 5, channel_params) == pytest.approx((15.0, 7.0))
-    assert calculate_current_prediction(model, 6, channel_params) == pytest.approx((17.0, 9.0))
-    assert calculate_current_prediction(model, 10, channel_params) == pytest.approx((25.0, 17.0))
-    assert calculate_current_prediction(model, 11, channel_params) == pytest.approx((25.0, 17.0))
+    assert calculate_current_prediction(model, 3, channel_params) == pytest.approx((np.exp(15.0), np.exp(7.0)))
+    assert calculate_current_prediction(model, 5, channel_params) == pytest.approx((np.exp(15.0), np.exp(7.0)))
+    assert calculate_current_prediction(model, 6, channel_params) == pytest.approx((np.exp(17.0), np.exp(9.0)))
+    assert calculate_current_prediction(model, 10, channel_params) == pytest.approx((np.exp(25.0), np.exp(17.0)))
+    assert calculate_current_prediction(model, 11, channel_params) == pytest.approx((np.exp(25.0), np.exp(17.0)))
 
 
 def test_channel_frozen_last_prediction_advances_from_current_coordinate() -> None:
@@ -214,13 +217,13 @@ def test_channel_frozen_last_prediction_advances_from_current_coordinate() -> No
     channel_params = params(trend_window=10, channel_window=30)
 
     assert calculate_frozen_last_prediction(model, 8, channel_params) == pytest.approx(
-        (23.0, 15.0, 4)
+        (np.exp(23.0), np.exp(15.0), 4)
     )
     assert calculate_frozen_last_prediction(model, 10, channel_params) == pytest.approx(
-        (27.0, 19.0, 6)
+        (np.exp(27.0), np.exp(19.0), 6)
     )
     assert calculate_frozen_last_prediction(model, 11, channel_params) == pytest.approx(
-        (27.0, 19.0, 6)
+        (np.exp(27.0), np.exp(19.0), 6)
     )
 
 
@@ -263,17 +266,17 @@ def test_channel_switch_emits_frozen_last_prediction_and_promotes_old_model() ->
         completed_bar(3, 4.0), trend(4.0, TrendLabel.DOWN), state, params()
     )
 
-    assert result.pred_high == pytest.approx(6.0)
-    assert result.pred_low == pytest.approx(4.0)
-    assert result.last_pred_high == pytest.approx(6.0)
-    assert result.last_pred_low == pytest.approx(4.0)
+    assert result.pred_high == pytest.approx(np.exp(6.0))
+    assert result.pred_low == pytest.approx(np.exp(4.0))
+    assert result.last_pred_high == pytest.approx(np.exp(6.0))
+    assert result.last_pred_low == pytest.approx(np.exp(4.0))
     assert result.effective_trend is TrendLabel.DOWN
     assert result.last_trend_slope == pytest.approx(1.0)
     assert result.last_trend_intercept == pytest.approx(3.0)
     assert result.last_trend_bar_count == 2
     assert result.channel_stack_length_after == 1
     assert [item.price for item in state.bars] == [1.0, 2.0, 3.0]
-    assert [item.price for item in next_state.bars] == [4.0]
+    assert [item.price for item in next_state.bars] == pytest.approx([np.log(4.0)])
 
 
 def test_channel_last_prediction_continues_after_stable_current_model_freezes() -> None:
@@ -304,14 +307,14 @@ def test_channel_last_prediction_continues_after_stable_current_model_freezes() 
         completed_bar(12, 12.0), trend(12.0, TrendLabel.DOWN), next_state, channel_params
     )
 
-    assert switch_result.last_pred_high == pytest.approx(27.0)
-    assert switch_result.last_pred_low == pytest.approx(19.0)
-    assert switch_result.pred_high == pytest.approx(27.0)
-    assert switch_result.pred_low == pytest.approx(19.0)
-    assert next_result.last_pred_high == pytest.approx(29.0)
-    assert next_result.last_pred_low == pytest.approx(21.0)
-    assert next_result.pred_high == pytest.approx(29.0)
-    assert next_result.pred_low == pytest.approx(21.0)
+    assert switch_result.last_pred_high == pytest.approx(np.exp(27.0))
+    assert switch_result.last_pred_low == pytest.approx(np.exp(19.0))
+    assert switch_result.pred_high == pytest.approx(np.exp(27.0))
+    assert switch_result.pred_low == pytest.approx(np.exp(19.0))
+    assert next_result.last_pred_high == pytest.approx(np.exp(29.0))
+    assert next_result.last_pred_low == pytest.approx(np.exp(21.0))
+    assert next_result.pred_high == pytest.approx(np.exp(29.0))
+    assert next_result.pred_low == pytest.approx(np.exp(21.0))
 
 
 def test_channel_null_raw_trend_continues_existing_segment() -> None:
@@ -326,7 +329,7 @@ def test_channel_null_raw_trend_continues_existing_segment() -> None:
 
     assert result.pred_high is None
     assert next_state.effective_trend is TrendLabel.UP
-    assert next_state.bars[-1].price == pytest.approx(2.0)
+    assert next_state.bars[-1].price == pytest.approx(np.log(2.0))
 
 
 def test_channel_retains_only_the_latest_channel_window_bars() -> None:
@@ -341,7 +344,9 @@ def test_channel_retains_only_the_latest_channel_window_bars() -> None:
 
     assert result is not None
     assert result.channel_stack_length_after == 3
-    assert [bar.price for bar in state.bars] == [2.0, 3.0, 4.0]
+    assert [bar.price for bar in state.bars] == pytest.approx(
+        [np.log(2.0), np.log(3.0), np.log(4.0)]
+    )
 
 
 def test_decision_engine_records_trigger_count_and_resets_after_persist() -> None:

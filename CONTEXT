@@ -57,6 +57,12 @@ Implemented scope:
   history: `delay = trend_window // 2`; use all Bars for `n <= delay`, the
   first `delay` Bars for `delay < n <= 2 * delay`, and `channel_stack[:n-delay]`
   for `n > 2 * delay`.
+- Trend regresses `log(HLC3)` and its slope metrics are log-price values.
+  Channel regresses `log(HLC3)` and measures residuals against `log(high)` and
+  `log(low)`. Its retained model fields are log-price values, while all exposed
+  `pred_*` fields are individually restored with `exp` before blending. Raw
+  HLC3 remains `trend_price` and remains the price used by Decision, thresholds,
+  signal events, and daily statistics.
 - Fixed Threshold remains unchanged. Auto Threshold resets every date,
   initializes from the first completed Bar's raw `open`, and updates after
   triggered BUY or SELL for the next Bar. `threshold_update_rate` is a 0-100
