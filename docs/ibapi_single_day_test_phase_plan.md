@@ -464,7 +464,7 @@ snapshot, `TrendResult`, `ChannelResult`, and `DecisionResult` is expanded
 into a dedicated column with a stable prefix where needed (`trend_`,
 `channel_`, and `decision_`).
 
-The current database schema metadata is `dual_backtest_reward_v1`. It also preserves
+The current database schema metadata is `two_operation_reward_v1`. It also preserves
 the raw request metadata `bar_size`, `what_to_show`, `use_rth`, and `source`.
 Upgrading to this schema appends missing summary fields only; existing rows are
 not recalculated, reset, or overwritten, and the appended fields remain null.
@@ -1348,27 +1348,24 @@ key is unchanged.
 
 `single_day_run` remains the per-date record keyed by `(run_id, trade_date)`.
 At terminal state it stores `first_threshold`, `signal_count`, and `best_price`.
-For Backtest, ordered signal-event prices produce `first_trigger_reward` and
-`full_position_reward`. BUY scores `(first_threshold - order_price) /
+For Backtest, the first two signal-event prices produce `first_reward`,
+`second_reward`, and `reward`. BUY scores `(first_threshold - order_price) /
 (first_threshold - best_price)`; SELL uses `(order_price - first_threshold) /
-(best_price - first_threshold)`, clipped to `[0, 1]`. The first metric uses the
-first signal; the full-position metric is `sum(signal_reward_i / 2**i)` with
-one-based order, leaving unallocated shares at zero. Missing inputs or a
-non-positive denominator on a signaled day leave both metrics null. No-signal
-Backtest days store both as zero; Live leaves both null.
+(best_price - first_threshold)`, clipped to `[0, 1]`. `reward` is the average
+of the first and second score, or equals the first score when there is only one
+signal; later signals remain recorded and counted but do not affect reward.
+Missing inputs or a non-positive denominator on a signaled day leave all three
+metrics null. No-signal Backtest days store all three as zero; Live leaves all
+three null.
 Backtest holds processed records in memory and exports one full-schema CSV per
 run ID; it does not write `processed_1m_bar` to SQLite. Live keeps SQLite
 processed-Bar persistence.
 
 `run_summary` is scan-level and keyed only by `run_id`. It stores total
-processed Bars/signals and `avg_signal_count_per_day`, averages and maxima for
-both Backtest Reward fields, `max_signal_count_per_day`, and the date-ordered
-tie fields `max_first_trigger_reward_days` and
-`max_full_position_reward_days`.
-The two date fields contain all comma-separated, date-ordered ties for the
-respective maximum. Averages include only
-completed days that processed Bars; zero-signal days contribute zero to all
-three averages. Any failed day
+processed Bars/signals and `avg_signal_count_per_day`, averages and independent
+maxima for all three Backtest Reward fields, and `max_signal_count_per_day`.
+Averages include only completed days that processed Bars; zero-signal days
+contribute zero to all Reward averages. Any failed day
 makes the scan summary FAILED, while skipped days do not.
 
 ## Live connection recovery current state

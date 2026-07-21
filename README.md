@@ -138,22 +138,19 @@ Bar auditing.
 Each raw Bar also stores an ET, zone-aware, minute-rounded `timestamp` beside
 its canonical IBAPI epoch `date`. At each terminal daily run, `single_day_run`
 stores the actual first threshold, triggered signal count, and direction-aware
-best `trend_price`. Backtest also stores `first_trigger_reward` and
-`full_position_reward`. Each signal price is scored against the first threshold
-and same-day best price using BUY/SELL-aware distance. The first metric is the
-first signal score; the full-position metric is
-`sum(signal_reward_i / 2**i)` for one-based trigger order, so unallocated shares
-contribute zero. A Backtest no-signal day stores zero for both metrics; missing
-inputs or a non-positive directional denominator on a signaled day produce
-null metrics. Live leaves both fields null.
+best `trend_price`. Backtest also stores `first_reward`, `second_reward`, and
+`reward`. The first two signal prices are scored against the first threshold and
+same-day best price using BUY/SELL-aware distance; `reward` is their average, or
+equals `first_reward` when only one signal exists. Later signals remain recorded
+and counted but do not affect reward. A Backtest no-signal day stores zero for
+all three metrics; missing inputs or a non-positive directional denominator on a
+signaled day produce null metrics. Live leaves all three fields null.
 For each `run_id`, `run_summary` stores total processed Bars and signals plus
-the average signal count and both Backtest rewards over completed days that
+the average signal count and all three Backtest rewards over completed days that
 processed Bars. Reward averages include no-signal days as zero and exclude null
-metrics. It also stores each metric's maximum and comma-separated, date-ordered
-ties in `max_first_trigger_reward_days` and
-`max_full_position_reward_days`. A failed day makes the scan summary `FAILED`;
-skipped days do not.
-When an existing database upgrades to `dual_backtest_reward_v1`, initialization
+metrics. It also stores independent maxima for first, second, and daily reward.
+A failed day makes the scan summary `FAILED`; skipped days do not.
+When an existing database upgrades to `two_operation_reward_v1`, initialization
 only appends missing fields. It does not reset, recalculate, or rewrite
 historical rows. Legacy best-reward/efficiency columns and values remain
 unchanged, while the new fields are null for old rows.

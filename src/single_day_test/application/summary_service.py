@@ -9,14 +9,14 @@ from ..domain.states import RuntimeState
 def _build(context: RunContext, state: RuntimeState, ended: datetime, status: RunStatus, error: Exception | None) -> RunSummary:
     statistics = state.statistics
     if context.mode is RunMode.BACKTEST:
-        first_trigger_reward, full_position_reward = calculate_position_rewards(
+        first_reward, second_reward, reward = calculate_position_rewards(
             direction=context.direction,
             first_threshold=statistics.first_threshold,
             best_price=statistics.best_price,
             order_prices=tuple(event.price for event in state.signal_events),
         )
     else:
-        first_trigger_reward = full_position_reward = None
+        first_reward = second_reward = reward = None
     return RunSummary(
         context.run_id, context.symbol, context.trade_date, context.mode,
         context.direction, context.parameter_set.parameter_set_id,
@@ -24,7 +24,7 @@ def _build(context: RunContext, state: RuntimeState, ended: datetime, status: Ru
         len(state.signal_events), status, context.started_at_et, ended,
         type(error).__name__ if error else None, str(error) if error else None,
         statistics.first_threshold, statistics.best_price,
-        first_trigger_reward, full_position_reward,
+        first_reward, second_reward, reward,
     )
 def build_completed_summary(context: RunContext,state: RuntimeState,ended_at_et: datetime) -> RunSummary: return _build(context,state,ended_at_et,RunStatus.COMPLETED,None)
 def build_failed_summary(context: RunContext,state: RuntimeState,error: Exception,ended_at_et: datetime) -> RunSummary: return _build(context,state,ended_at_et,RunStatus.FAILED,error)

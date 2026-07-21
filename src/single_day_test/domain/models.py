@@ -229,8 +229,9 @@ class RunSummary:
     error_message: str | None
     first_threshold: float | None = None
     best_price: float | None = None
-    first_trigger_reward: float | None = None
-    full_position_reward: float | None = None
+    first_reward: float | None = None
+    second_reward: float | None = None
+    reward: float | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "started_at_et", _normalize_dt(self.started_at_et))

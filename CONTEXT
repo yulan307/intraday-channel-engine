@@ -23,7 +23,7 @@ Implemented scope:
   used for the current Bar decision. Its `decision` value is null when no
   signal triggers, and otherwise is `BUY` or `SELL`. There are no JSON payload
   columns and no persisted `_et` columns.
-- The SQLite schema metadata is `dual_backtest_reward_v1`. Initialization creates
+- The SQLite schema metadata is `two_operation_reward_v1`. Initialization creates
   missing tables without clearing or rebuilding existing data; it forward-adds
   dedicated Channel-mix processed-bar and dual-Reward summary columns
   when they are absent. Existing rows are not reset or recalculated; newly
@@ -78,19 +78,19 @@ Implemented scope:
   and resets the rearm state, while Trend and Channel state remain unchanged.
 - `single_day_run` records `threshold_update_rate`, the actual first threshold,
   processed-Bar count, signal count, and direction-aware daily best price.
-  Backtest additionally records `first_trigger_reward` for the first signal and
-  `full_position_reward = sum(signal_reward_i / 2**i)` across ordered signals;
-  the unallocated geometric share contributes zero. Signal reward is the
-  BUY/SELL-aware threshold-to-order distance divided by the threshold-to-best
-  distance and clipped to `[0, 1]`. A Backtest no-signal day produces two zeros;
+  Backtest additionally records `first_reward`, `second_reward`, and `reward`.
+  The first two triggered signals are scored using the BUY/SELL-aware
+  threshold-to-order distance divided by the threshold-to-best distance, clipped
+  to `[0, 1]`; `reward` is their average. A one-signal day has
+  `second_reward = NULL` and `reward = first_reward`; later signals are recorded
+  and counted but do not affect reward. A no-signal day produces three zeros;
   missing inputs or a non-positive directional denominator on a signaled day
-  produces two nulls. Live leaves both Reward fields null.
+  produces three nulls. Live leaves all three Reward fields null.
   It uses `(run_id, trade_date)` keys. `run_summary` has one scan-level row per
   `run_id`, with total counts plus averages across completed days that processed
-  Bars. It also records maximum daily signal count and both Reward metrics,
-  plus the comma-separated trade dates tied for each metric maximum.
-  No-signal days contribute zero to average signal count and both Reward
-  averages; null Reward days are excluded.
+  Bars. It also records maximum daily signal count plus first, second, and daily
+  Reward averages and independent maxima. No-signal days contribute zero to
+  average signal count and all Reward averages; null Reward days are excluded.
   Non-trading days are `SKIPPED`; failures are `FAILED`; later dates continue.
   Partial processed rows from failed dates remain in the one multi-day
   `data/<run_id>.csv` export. Backtest retains processed records in memory and

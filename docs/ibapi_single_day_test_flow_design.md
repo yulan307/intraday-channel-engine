@@ -316,7 +316,7 @@ inclusive calendar dates. Each parameter set receives one generated `run_id`;
 daily `single_day_run` records use `(run_id, trade_date)`, while scan-level
 `run_summary` records use `run_id`. `SKIPPED` non-trading days and `FAILED`
 days do not stop later dates, and one multi-day CSV is exported after all dates.
-The current SQLite schema metadata is `dual_backtest_reward_v1`; initialization
+The current SQLite schema metadata is `two_operation_reward_v1`; initialization
 creates missing tables without rebuilding existing data and forward-adds
 dedicated Channel-mix processed-bar and dual-Reward summary columns when
 absent; existing rows are not recalculated and appended fields remain null.
@@ -1732,18 +1732,20 @@ zone-aware, minute-rounded ISO `timestamp`; its `(symbol, date)` key is
 unchanged. At the terminal state of a daily run, persisted processed Bars and
 signal events produce `single_day_run.first_threshold`, `signal_count`, and
 direction-aware `best_price`. Backtest ordered signal prices additionally
-produce `first_trigger_reward` and `full_position_reward`. Each order score is
-its BUY/SELL-aware threshold improvement divided by the same-day best
-improvement and clipped to `[0, 1]`; the full-position score applies weights
-`1/2, 1/4, 1/8, ...`, leaving the unallocated share at zero. Missing inputs or a
-non-positive directional denominator on a signaled day leave both metrics null.
-A no-signal Backtest day has two zero Rewards; Live leaves both null.
+produce `first_reward`, `second_reward`, and `reward`. Only the first two
+signals are scored with their BUY/SELL-aware threshold improvement divided by
+the same-day best improvement and clipped to `[0, 1]`; `reward` is their
+average, or equals `first_reward` when there is only one signal. Later signals
+remain recorded and counted but do not affect reward. Missing inputs or a
+non-positive directional denominator on a signaled day leave all three metrics
+null. A no-signal Backtest day has three zero Rewards; Live leaves all three
+null.
 
 After each Backtest parameter-set scan, one `run_summary` row is written for
 the `run_id`. It aggregates total Bars/signals and averages from completed days
-that processed Bars. It also records maximum daily signal count, both Backtest
-Reward averages and maxima, plus comma-separated date-ordered ties for each
-Reward maximum. No-signal days contribute zero to all three averages. Any failed
+that processed Bars. It also records maximum daily signal count plus first,
+second, and daily Backtest Reward averages and independent maxima. No-signal
+days contribute zero to all Reward averages. Any failed
 daily run marks
 the scan summary FAILED; skipped days do not. Backtest retains processed records
 in memory and writes one full-schema CSV per run ID instead of SQLite processed

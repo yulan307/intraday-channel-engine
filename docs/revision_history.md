@@ -1,5 +1,7 @@
 # Revision History
 
+| 2026-07-22 | `domain/metrics.py`, `application/summary_service.py`, SQLite daily/scan summaries, and tests | Replaced geometric all-signal Backtest reward aggregation with a two-operation daily statistic: first reward, second reward, and their daily average. One-signal days retain the first reward as the daily reward; no-signal days store zero; later signals remain recorded but do not affect reward. Added non-destructive SQLite fields and independent first/second/daily run-summary averages and maxima without rewriting legacy values. | Updated README, CONTEXT, maintained Backtest design/flow/phase documents, the algorithm evaluation note, and this revision history. |
+
 | 2026-07-18 | `configs/parameter_set.csv` | Corrected two duplicated `trend10` high-R2 p85 parameter-set IDs so their names match `continuous_break_count` values 1 and 2. | No current-state documentation changes required. |
 
 | 2026-07-18 | `domain/metrics.py`, `application/summary_service.py`, SQLite run summaries, and tests | Replaced daily reward with the capped first-threshold distance ratio and changed efficiency to reward raised to the day's triggered signal count. Completed no-signal days score zero for both metrics. `run_summary` now records comma-separated dates tied for maximum reward and efficiency. Schema upgrades append missing columns only and do not reset, overwrite, or recalculate historical rows. | Updated README, CONTEXT, current-state design documents, and this revision history. |
