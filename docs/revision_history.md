@@ -1,5 +1,7 @@
 # Revision History
 
+| 2026-07-22 | `engine/trend_engine.py`, `engine/channel_engine.py`, `tests/test_engine.py` | Switched Trend regression and Channel regression/residual calculations to log-price inputs. Exposed Channel predictions are individually restored to original-price units before blending; Decision, thresholds, signal prices, and statistics retain original-price behavior. | Updated README, CONTEXT, current Trend/Channel flow, development, phase-plan, and algorithm documentation. |
+
 | 2026-07-22 | `domain/metrics.py`, `application/summary_service.py`, SQLite daily/scan summaries, and tests | Replaced geometric all-signal Backtest reward aggregation with a two-operation daily statistic: first reward, second reward, and their daily average. One-signal days retain the first reward as the daily reward; no-signal days store zero; later signals remain recorded but do not affect reward. Added non-destructive SQLite fields and independent first/second/daily run-summary averages and maxima without rewriting legacy values. | Updated README, CONTEXT, maintained Backtest design/flow/phase documents, the algorithm evaluation note, and this revision history. |
 
 | 2026-07-18 | `configs/parameter_set.csv` | Corrected two duplicated `trend10` high-R2 p85 parameter-set IDs so their names match `continuous_break_count` values 1 and 2. | No current-state documentation changes required. |

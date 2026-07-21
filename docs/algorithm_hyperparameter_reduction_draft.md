@@ -7,11 +7,13 @@
 
 The current strategy pipeline is:
 
-1. `TrendEngine` calculates HLC3 and fits a rolling ordinary least-squares
-   regression.
+1. `TrendEngine` calculates HLC3, retains it as the external strategy price,
+   and fits a rolling ordinary least-squares regression on `log(HLC3)`.
 2. A raw trend is classified as UP, DOWN, or SIDEWAY from the regression R2,
    slope, and the rolling standard deviation of fitted slopes.
-3. `ChannelEngine` maintains a channel segment for the effective trend. It
+3. `ChannelEngine` maintains a channel segment for the effective trend using
+   `log(HLC3)`, `log(high)`, and `log(low)`. It restores every prediction to
+   original-price units before it is audited, blended, or passed to Decision. It
    freezes a prior-segment model on a trend change, calculates a delayed-current
    model, and blends the two prediction channels.
 4. `DecisionEngine` requires a prediction-channel break, threshold condition,

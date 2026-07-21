@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import exp
+from math import exp, log
 from typing import Sequence
 
 import numpy as np
@@ -31,7 +31,10 @@ def calculate_current_prediction(
     if model is None or forward_count is None:
         return None, None
     center = model.slope * forward_count + model.intercept
-    return center + model.high_percentile, center - model.low_percentile
+    return (
+        exp(center + model.high_percentile),
+        exp(center - model.low_percentile),
+    )
 
 
 def current_prediction_forward_count(
@@ -60,8 +63,8 @@ def calculate_frozen_last_prediction(
     count = current_count + 1
     center = model.slope * count + model.intercept
     return (
-        center + model.high_percentile,
-        center - model.low_percentile,
+        exp(center + model.high_percentile),
+        exp(center - model.low_percentile),
         count,
     )
 
@@ -178,9 +181,9 @@ class ChannelEngine:
         )
         current_bar = ChannelBar(
             timestamp_et=bar.raw.timestamp_et,
-            price=trend.price,
-            high=bar.raw.high,
-            low=bar.raw.low,
+            price=log(trend.price),
+            high=log(bar.raw.high),
+            low=log(bar.raw.low),
         )
 
         if not next_state.bars:
@@ -265,8 +268,8 @@ class ChannelEngine:
         count = state.last_trend_bar_count + 1
         center = state.last_trend_slope * count + state.last_trend_intercept
         return (
-            center + state.last_high_percentile,
-            center - state.last_low_percentile,
+            exp(center + state.last_high_percentile),
+            exp(center - state.last_low_percentile),
             count,
         )
 

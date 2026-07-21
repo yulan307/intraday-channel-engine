@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+from math import log
 
 import numpy as np
 
@@ -34,9 +35,13 @@ class TrendEngine:
         state: TrendState,
         params: ParameterSet,
     ) -> tuple[TrendResult, TrendState]:
+        # Keep the externally visible price in its original units.  Decision,
+        # thresholds, signal events, and statistics all use this value.
         price = (bar.raw.high + bar.raw.low + bar.raw.close) / 3.0
         next_bars = deque(state.bars, maxlen=params.trend_window)
-        next_bars.append(TrendBar(timestamp_et=bar.raw.timestamp_et, price=price))
+        next_bars.append(
+            TrendBar(timestamp_et=bar.raw.timestamp_et, price=log(price))
+        )
 
         if len(next_bars) < 3:
             return (

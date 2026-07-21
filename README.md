@@ -203,6 +203,15 @@ outside this scope.
 
 ## Channel blended prediction
 
+Trend and Channel calculations use log-price inputs: Trend regresses `log(HLC3)`;
+Channel regresses `log(HLC3)` and calculates upper/lower residual percentiles
+from `log(high)` and `log(low)`. Their fitted slopes, intercepts, and residual
+widths are therefore log-price values. `trend_price`, thresholds, signal prices,
+and every exposed `pred_*` value remain original-price values. Channel applies
+`exp` to each last/current prediction before auditing or blending it, so
+Decision continues to compare raw HLC3 with raw predictions and its existing
+threshold and rearm logic is unchanged.
+
 Each parameter-set CSV row requires `curr_mix_ratio` in `[0, 1]` and
 `channel_window >= trend_window`. Channel
 records prior-segment `last_pred_high` / `last_pred_low`, delayed-current
